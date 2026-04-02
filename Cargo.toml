@@ -14,6 +14,15 @@ toml = "0.8"
 uuid = { version = "1", features = ["v4", "serde"] }
 wasmtime = "43"
 wasmtime-wasi = "43"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+# Arbiter MCP Firewall integration (all path deps for version consistency)
+arbiter-mcp = { path = "../arbiter-mcp-firewall/crates/arbiter-mcp" }
+arbiter-audit = { path = "../arbiter-mcp-firewall/crates/arbiter-audit" }
+arbiter-policy = { path = "../arbiter-mcp-firewall/crates/arbiter-policy" }
+arbiter-session = { path = "../arbiter-mcp-firewall/crates/arbiter-session" }
+arbiter-identity = { path = "../arbiter-mcp-firewall/crates/arbiter-identity" }
+arbiter-behavior = { path = "../arbiter-mcp-firewall/crates/arbiter-behavior" }
 
 [dev-dependencies]
 assert_cmd = "2"

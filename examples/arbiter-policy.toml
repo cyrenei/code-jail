@@ -1,0 +1,49 @@
+# Example arbiter policy for containment sandbox authorization.
+#
+# This policy allows filesystem read access for any agent, but restricts
+# write and network access based on declared intent.
+#
+# Note: intent_match.keywords are AND-ed (all must match).
+# Use intent_match.regex for OR-style matching.
+
+[[policies]]
+id = "allow-fs-read"
+effect = "allow"
+allowed_tools = ["fs_read"]
+
+[policies.agent_match]
+trust_level = "basic"
+
+[[policies]]
+id = "allow-fs-write"
+effect = "allow"
+allowed_tools = ["fs_write"]
+
+[policies.agent_match]
+trust_level = "basic"
+
+[policies.intent_match]
+regex = "(?i)\\b(write|build|create|edit|modify|deploy)\\b"
+
+[[policies]]
+id = "allow-env-read"
+effect = "allow"
+allowed_tools = ["env_read"]
+
+[policies.agent_match]
+trust_level = "basic"
+
+[[policies]]
+id = "allow-net"
+effect = "allow"
+allowed_tools = ["net_connect"]
+
+[policies.agent_match]
+trust_level = "basic"
+
+[policies.intent_match]
+regex = "(?i)\\b(deploy|publish|fetch|download|network|api)\\b"
+
+[[policies]]
+id = "deny-all-default"
+effect = "deny"

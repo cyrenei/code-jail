@@ -2,6 +2,7 @@ use std::path::Path;
 
 use clap::{Parser, Subcommand};
 
+mod arbiter;
 mod capability;
 mod container;
 mod image;
@@ -22,6 +23,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Commands {
     /// Run a WASM module in a capability-restricted sandbox
     Run {
@@ -67,6 +69,18 @@ enum Commands {
         /// Wrap in bubblewrap outer sandbox (defense in depth)
         #[arg(long)]
         bwrap: bool,
+
+        /// Arbiter policy file for capability authorization (enables arbiter mode)
+        #[arg(long)]
+        arbiter: Option<String>,
+
+        /// Declared intent for arbiter behavioral drift detection
+        #[arg(long, default_value = "general")]
+        intent: String,
+
+        /// Arbiter audit log path
+        #[arg(long)]
+        audit_log: Option<String>,
 
         /// Arguments passed to the WASM module
         #[arg(last = true)]
@@ -148,6 +162,9 @@ fn main() -> anyhow::Result<()> {
             volumes,
             env_vars,
             bwrap,
+            arbiter,
+            intent,
+            audit_log,
             args,
         } => cmd_run(RunArgs {
             image,
@@ -161,6 +178,9 @@ fn main() -> anyhow::Result<()> {
             volumes,
             env_vars,
             bwrap,
+            arbiter,
+            intent,
+            audit_log,
             args,
         }),
         Commands::Ps { all } => cmd_ps(all),
@@ -188,6 +208,9 @@ struct RunArgs {
     volumes: Vec<String>,
     env_vars: Vec<String>,
     bwrap: bool,
+    arbiter: Option<String>,
+    intent: String,
+    audit_log: Option<String>,
     args: Vec<String>,
 }
 
@@ -216,9 +239,56 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
         }
     };
 
-    // Resolve all capabilities
-    let resolved =
-        capability::ResolvedCaps::from_parts(&base_caps, &grants, &a.volumes, &a.env_vars, a.net);
+    // Determine arbiter policy path (flag > env > none)
+    let arbiter_policy = a.arbiter.or_else(|| std::env::var("ARBITER_POLICY").ok());
+
+    // Resolve capabilities: either through arbiter policy or self-authorization
+    let resolved = if let Some(policy_path) = &arbiter_policy {
+        // Arbiter mode: evaluate each capability against policy
+        eprintln!("[containment] arbiter mode: policy {policy_path}");
+        let gate = arbiter::ArbiterGate::load(
+            Path::new(policy_path),
+            a.audit_log.as_deref().map(Path::new),
+        )?;
+
+        let rt = tokio::runtime::Runtime::new()?;
+        let verdict = rt.block_on(gate.evaluate_caps(
+            &a.image,
+            &a.intent,
+            &grants,
+            &a.volumes,
+            &a.env_vars,
+            a.net,
+            if a.fuel == 0 {
+                1000
+            } else {
+                a.fuel / 1_000_000
+            },
+            a.timeout,
+        ))?;
+
+        // Print arbiter decisions
+        for d in &verdict.decisions {
+            let icon = if d.allowed { "+" } else { "x" };
+            eprintln!("[containment]   [{icon}] {}: {}", d.tool_name, d.reason);
+        }
+        if verdict.denied_count > 0 {
+            eprintln!(
+                "[containment] arbiter denied {} of {} capability requests",
+                verdict.denied_count,
+                verdict.decisions.len()
+            );
+        }
+        eprintln!(
+            "[containment] session {} (agent {}, intent: '{}')",
+            verdict.session.session_id, verdict.agent.id, a.intent
+        );
+
+        verdict.authorized_caps
+    } else {
+        // Self-authorization mode: existing behavior
+        capability::ResolvedCaps::from_parts(&base_caps, &grants, &a.volumes, &a.env_vars, a.net)
+    };
 
     let limits = capability::Limits {
         fuel: if a.fuel == 0 { None } else { Some(a.fuel) },
