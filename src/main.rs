@@ -1,0 +1,495 @@
+use std::path::Path;
+
+use clap::{Parser, Subcommand};
+
+mod capability;
+mod container;
+mod image;
+mod runtime;
+mod sandbox;
+
+#[derive(Parser)]
+#[command(
+    name = "cask",
+    version,
+    about = "WASM sandbox with Docker-like commands.\n\n\
+             Run untrusted code with deny-by-default capabilities.\n\
+             Grant filesystem, network, and environment access explicitly."
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Run a WASM module in a capability-restricted sandbox
+    Run {
+        /// WASM module path or image name
+        image: String,
+
+        /// Capability grants: fs:read:/path, fs:write:/path, fs:/path, net:host:port, env:VAR
+        #[arg(long = "cap")]
+        caps: Vec<String>,
+
+        /// Run detached (background)
+        #[arg(short = 'd', long)]
+        detach: bool,
+
+        /// Container name
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Caskfile path for capability manifest
+        #[arg(short = 'f', long)]
+        caskfile: Option<String>,
+
+        /// CPU fuel limit (0 = unlimited)
+        #[arg(long, default_value = "1000000000")]
+        fuel: u64,
+
+        /// Wall-clock timeout in seconds
+        #[arg(long, default_value = "300")]
+        timeout: u64,
+
+        /// Enable all network access
+        #[arg(long)]
+        net: bool,
+
+        /// Mount volume host_path:guest_path (or just path for same)
+        #[arg(short = 'v', long = "volume")]
+        volumes: Vec<String>,
+
+        /// Set environment variable (KEY=VALUE or KEY to inherit from host)
+        #[arg(short = 'e', long = "env")]
+        env_vars: Vec<String>,
+
+        /// Wrap in bubblewrap outer sandbox (defense in depth)
+        #[arg(long)]
+        bwrap: bool,
+
+        /// Arguments passed to the WASM module
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
+
+    /// List containers
+    Ps {
+        /// Show all (including stopped/failed)
+        #[arg(short = 'a', long)]
+        all: bool,
+    },
+
+    /// Stop a running container
+    Stop {
+        /// Container ID, short ID, or name
+        id: String,
+    },
+
+    /// Remove a stopped container
+    Rm {
+        /// Container ID, short ID, or name
+        id: String,
+    },
+
+    /// Remove all stopped containers
+    Prune,
+
+    /// List images in the local store
+    Images,
+
+    /// Import a .wasm file as a named image
+    Import {
+        /// Image name
+        name: String,
+        /// Path to .wasm file
+        path: String,
+    },
+
+    /// Remove an image
+    Rmi {
+        /// Image name
+        name: String,
+    },
+
+    /// Inspect a WASM module (show exports, imports, size)
+    Inspect {
+        /// Image name or .wasm path
+        image: String,
+    },
+
+    /// Build from a Caskfile.toml
+    Build {
+        /// Build context directory
+        #[arg(default_value = ".")]
+        context: String,
+
+        /// Caskfile path (relative to context)
+        #[arg(short = 'f', long, default_value = "Caskfile.toml")]
+        file: String,
+    },
+
+    /// Show sandbox capabilities and system info
+    Info,
+}
+
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    match cli.command {
+        Commands::Run {
+            image,
+            caps,
+            detach,
+            name,
+            caskfile,
+            fuel,
+            timeout,
+            net,
+            volumes,
+            env_vars,
+            bwrap,
+            args,
+        } => cmd_run(
+            &image, &caps, detach, name, caskfile, fuel, timeout, net, &volumes, &env_vars, bwrap,
+            &args,
+        ),
+        Commands::Ps { all } => cmd_ps(all),
+        Commands::Stop { id } => cmd_stop(&id),
+        Commands::Rm { id } => cmd_rm(&id),
+        Commands::Prune => cmd_prune(),
+        Commands::Images => cmd_images(),
+        Commands::Import { name, path } => cmd_import(&name, &path),
+        Commands::Rmi { name } => cmd_rmi(&name),
+        Commands::Inspect { image } => cmd_inspect(&image),
+        Commands::Build { context, file } => cmd_build(&context, &file),
+        Commands::Info => cmd_info(),
+    }
+}
+
+fn cmd_run(
+    image: &str,
+    cap_strs: &[String],
+    _detach: bool,
+    name: Option<String>,
+    caskfile: Option<String>,
+    fuel: u64,
+    timeout: u64,
+    net: bool,
+    volumes: &[String],
+    env_vars: &[String],
+    bwrap: bool,
+    args: &[String],
+) -> anyhow::Result<()> {
+    // Resolve image path
+    let image_store = image::ImageStore::new()?;
+    let wasm_path = image_store.resolve(image)?;
+
+    // Parse --cap grants
+    let mut grants = Vec::new();
+    for s in cap_strs {
+        grants.push(capability::CapGrant::parse(s)?);
+    }
+
+    // Load base capabilities from Caskfile or defaults
+    let base_caps = if let Some(cf_path) = &caskfile {
+        let content = std::fs::read_to_string(cf_path)?;
+        let cf: capability::Caskfile = toml::from_str(&content)?;
+        cf.capabilities
+    } else {
+        capability::Capabilities {
+            stdin: true,
+            stdout: true,
+            stderr: true,
+            ..Default::default()
+        }
+    };
+
+    // Resolve all capabilities
+    let resolved = capability::ResolvedCaps::from_parts(&base_caps, &grants, volumes, env_vars, net);
+
+    let limits = capability::Limits {
+        fuel: if fuel == 0 { None } else { Some(fuel) },
+        wall_time_secs: Some(timeout),
+        memory_mb: Some(256),
+    };
+
+    // Check bwrap if requested
+    if bwrap && !sandbox::bwrap_available() {
+        anyhow::bail!("--bwrap requested but bubblewrap is not installed");
+    }
+
+    // Create container record
+    let container_name = name.unwrap_or_else(|| {
+        let stem = wasm_path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy();
+        format!("{stem}-{}", &uuid::Uuid::new_v4().to_string()[..8])
+    });
+    let mut ctr = container::Container::new(&container_name, image, cap_strs);
+    let store = container::ContainerStore::new()?;
+
+    // Print container ID (like docker)
+    println!("{}", ctr.short_id);
+
+    // Print capability summary
+    eprintln!("[cask] Sandbox: {}", container_name);
+    eprintln!("[cask] Image:   {}", wasm_path.display());
+    if !resolved.fs_mounts.is_empty() {
+        for m in &resolved.fs_mounts {
+            let mode = if m.writable { "rw" } else { "ro" };
+            eprintln!("[cask]   fs: {} -> {} ({})", m.host.display(), m.guest, mode);
+        }
+    }
+    if !resolved.net_rules.is_empty() {
+        eprintln!("[cask]   net: {:?}", resolved.net_rules);
+    }
+    if resolved.fs_mounts.is_empty() && resolved.net_rules.is_empty() {
+        eprintln!("[cask]   (no capabilities granted — fully isolated)");
+    }
+    eprintln!();
+
+    // Run
+    let rt = runtime::SandboxRuntime::new(limits.fuel.is_some())?;
+    match rt.run(&wasm_path, &resolved, &limits, args) {
+        Ok(()) => {
+            ctr.status = container::ContainerStatus::Exited(0);
+            store.save(&ctr)?;
+        }
+        Err(e) => {
+            ctr.status = container::ContainerStatus::Failed(e.to_string());
+            store.save(&ctr)?;
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
+fn cmd_ps(all: bool) -> anyhow::Result<()> {
+    let store = container::ContainerStore::new()?;
+    let containers = store.list()?;
+
+    println!(
+        "{:<14} {:<20} {:<20} {:<22} {}",
+        "CONTAINER ID", "NAME", "STATUS", "CREATED", "IMAGE"
+    );
+    for c in &containers {
+        if !all && !matches!(c.status, container::ContainerStatus::Running) {
+            continue;
+        }
+        println!(
+            "{:<14} {:<20} {:<20} {:<22} {}",
+            c.short_id,
+            truncate(&c.name, 18),
+            c.status,
+            c.created.format("%Y-%m-%d %H:%M:%S"),
+            c.image
+        );
+    }
+    if containers.is_empty() {
+        eprintln!("No containers found. Run one with: cask run <image.wasm>");
+    }
+    Ok(())
+}
+
+fn cmd_stop(id: &str) -> anyhow::Result<()> {
+    let store = container::ContainerStore::new()?;
+    let mut c = store.load(id)?;
+    if let Some(pid) = c.pid {
+        let _ = nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(pid as i32),
+            nix::sys::signal::Signal::SIGTERM,
+        );
+    }
+    c.status = container::ContainerStatus::Exited(137);
+    store.save(&c)?;
+    println!("{}", c.short_id);
+    Ok(())
+}
+
+fn cmd_rm(id: &str) -> anyhow::Result<()> {
+    let store = container::ContainerStore::new()?;
+    let c = store.load(id)?;
+    if matches!(c.status, container::ContainerStatus::Running) {
+        anyhow::bail!("Cannot remove running container {}. Stop it first.", c.short_id);
+    }
+    store.remove(&c.id)?;
+    println!("{}", c.short_id);
+    Ok(())
+}
+
+fn cmd_prune() -> anyhow::Result<()> {
+    let store = container::ContainerStore::new()?;
+    let count = store.prune()?;
+    println!("Removed {count} stopped container(s)");
+    Ok(())
+}
+
+fn cmd_images() -> anyhow::Result<()> {
+    let store = image::ImageStore::new()?;
+    let images = store.list()?;
+
+    println!("{:<20} {:<12} {}", "NAME", "SIZE", "PATH");
+    for img in &images {
+        println!(
+            "{:<20} {:<12} {}",
+            img.name,
+            human_size(img.size),
+            img.path.display()
+        );
+    }
+    if images.is_empty() {
+        eprintln!("No images. Import one with: cask import <name> <path.wasm>");
+    }
+    Ok(())
+}
+
+fn cmd_import(name: &str, path: &str) -> anyhow::Result<()> {
+    let store = image::ImageStore::new()?;
+    let img = store.import(name, Path::new(path))?;
+    println!("Imported: {} ({})", img.name, human_size(img.size));
+    Ok(())
+}
+
+fn cmd_rmi(name: &str) -> anyhow::Result<()> {
+    let store = image::ImageStore::new()?;
+    store.remove(name)?;
+    println!("Removed: {name}");
+    Ok(())
+}
+
+fn cmd_inspect(image: &str) -> anyhow::Result<()> {
+    let store = image::ImageStore::new()?;
+    let path = store.resolve(image)?;
+    let info = runtime::inspect_module(&path)?;
+
+    println!("Image:   {image}");
+    println!("Path:    {}", path.display());
+    println!("Size:    {}", human_size(info.size));
+    println!();
+    println!("Exports ({}):", info.exports.len());
+    for e in &info.exports {
+        println!("  {e}");
+    }
+    println!();
+    println!("Imports ({}):", info.imports.len());
+    for i in &info.imports {
+        println!("  {i}");
+    }
+    Ok(())
+}
+
+fn cmd_build(context: &str, file: &str) -> anyhow::Result<()> {
+    let caskfile_path = Path::new(context).join(file);
+    anyhow::ensure!(
+        caskfile_path.exists(),
+        "Caskfile not found: {}",
+        caskfile_path.display()
+    );
+
+    let content = std::fs::read_to_string(&caskfile_path)?;
+    let cf: capability::Caskfile = toml::from_str(&content)?;
+
+    let entrypoint = Path::new(context).join(&cf.sandbox.entrypoint);
+    anyhow::ensure!(
+        entrypoint.exists(),
+        "Entrypoint not found: {}",
+        entrypoint.display()
+    );
+
+    let image_name = cf
+        .sandbox
+        .name
+        .unwrap_or_else(|| {
+            entrypoint
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string()
+        });
+
+    // If it's a Rust source file, compile to WASM
+    if entrypoint.extension().is_some_and(|e| e == "rs") {
+        println!("[cask] Compiling {} -> wasm32-wasip1...", entrypoint.display());
+        let wasm_out = entrypoint.with_extension("wasm");
+        let output = std::process::Command::new("rustc")
+            .args(["--target", "wasm32-wasip1", "--edition", "2021", "-o"])
+            .arg(&wasm_out)
+            .arg(&entrypoint)
+            .output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("Compilation failed:\n{stderr}");
+        }
+        println!("[cask] Compiled: {}", wasm_out.display());
+
+        let store = image::ImageStore::new()?;
+        let img = store.import(&image_name, &wasm_out)?;
+        println!("[cask] Image '{}' ready ({})", img.name, human_size(img.size));
+    } else if entrypoint.extension().is_some_and(|e| e == "wasm") {
+        let store = image::ImageStore::new()?;
+        let img = store.import(&image_name, &entrypoint)?;
+        println!("[cask] Image '{}' ready ({})", img.name, human_size(img.size));
+    } else {
+        anyhow::bail!(
+            "Don't know how to build '{}'. Supported: .rs, .wasm",
+            cf.sandbox.entrypoint
+        );
+    }
+
+    Ok(())
+}
+
+fn cmd_info() -> anyhow::Result<()> {
+    println!("cask {}", env!("CARGO_PKG_VERSION"));
+    println!();
+    println!("Runtime:     wasmtime 43");
+    println!("WASI:        preview 1 (wasm32-wasip1)");
+    println!("Data dir:    {}", container::cask_home().display());
+    println!("Bubblewrap:  {}", if sandbox::bwrap_available() { "available" } else { "not found" });
+    println!();
+
+    // Check wasm target
+    let has_target = std::process::Command::new("rustup")
+        .args(["target", "list", "--installed"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("wasm32-wasip1"))
+        .unwrap_or(false);
+    println!(
+        "wasm32-wasip1 target: {}",
+        if has_target { "installed" } else { "not installed (run: rustup target add wasm32-wasip1)" }
+    );
+
+    println!();
+    println!("Capability model: deny-by-default");
+    println!("  --cap fs:read:/path    Grant read access to directory");
+    println!("  --cap fs:write:/path   Grant write access to directory");
+    println!("  --cap fs:/path         Grant read+write access");
+    println!("  --cap net:host:port    Allow network to specific destination");
+    println!("  --cap net:*            Allow all network access");
+    println!("  --cap env:VAR1,VAR2    Pass environment variables");
+    println!("  -v host:guest          Mount directory (read+write)");
+    println!("  -e KEY=VALUE           Set environment variable");
+    println!("  --net                  Allow all network access");
+    println!("  --bwrap                Enable bubblewrap outer sandbox");
+    Ok(())
+}
+
+fn human_size(bytes: u64) -> String {
+    if bytes >= 1_000_000 {
+        format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+    } else if bytes >= 1_000 {
+        format!("{:.1} KB", bytes as f64 / 1_000.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() > max {
+        format!("{}...", &s[..max - 3])
+    } else {
+        s.to_string()
+    }
+}

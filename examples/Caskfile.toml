@@ -1,0 +1,31 @@
+# Example Caskfile — capability manifest for a sandboxed agent
+[sandbox]
+name = "my-agent"
+entrypoint = "agent.wasm"
+
+[capabilities]
+# Filesystem: read-only access to project, write access to output
+fs_read = ["/project"]
+fs_write = ["/project/output", "/tmp"]
+
+# Network: allow specific API endpoints
+net_allow = ["api.openai.com:443", "api.anthropic.com:443", "github.com:443"]
+
+# Environment: pass specific variables only
+env = ["HOME", "PATH", "API_KEY"]
+inherit_env = false
+
+# Stdio
+stdin = true
+stdout = true
+stderr = true
+
+[limits]
+# Memory limit in MB
+memory_mb = 512
+
+# CPU fuel (wasmtime fuel units — ~1B = several seconds of compute)
+fuel = 1_000_000_000
+
+# Wall-clock timeout in seconds (5 minutes)
+wall_time_secs = 300

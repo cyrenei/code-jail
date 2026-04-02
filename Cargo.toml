@@ -1,0 +1,16 @@
+[package]
+name = "cask"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+nix = { version = "0.30", features = ["sched", "signal", "user", "mount", "process"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+uuid = { version = "1", features = ["v4", "serde"] }
+wasmtime = "43"
+wasmtime-wasi = "43"
