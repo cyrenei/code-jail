@@ -149,10 +149,20 @@ fn main() -> anyhow::Result<()> {
             env_vars,
             bwrap,
             args,
-        } => cmd_run(
-            &image, &caps, detach, name, caskfile, fuel, timeout, net, &volumes, &env_vars, bwrap,
-            &args,
-        ),
+        } => cmd_run(RunArgs {
+            image,
+            caps,
+            _detach: detach,
+            name,
+            caskfile,
+            fuel,
+            timeout,
+            net,
+            volumes,
+            env_vars,
+            bwrap,
+            args,
+        }),
         Commands::Ps { all } => cmd_ps(all),
         Commands::Stop { id } => cmd_stop(&id),
         Commands::Rm { id } => cmd_rm(&id),
@@ -166,32 +176,34 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-fn cmd_run(
-    image: &str,
-    cap_strs: &[String],
+struct RunArgs {
+    image: String,
+    caps: Vec<String>,
     _detach: bool,
     name: Option<String>,
     caskfile: Option<String>,
     fuel: u64,
     timeout: u64,
     net: bool,
-    volumes: &[String],
-    env_vars: &[String],
+    volumes: Vec<String>,
+    env_vars: Vec<String>,
     bwrap: bool,
-    args: &[String],
-) -> anyhow::Result<()> {
+    args: Vec<String>,
+}
+
+fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
     // Resolve image path
     let image_store = image::ImageStore::new()?;
-    let wasm_path = image_store.resolve(image)?;
+    let wasm_path = image_store.resolve(&a.image)?;
 
     // Parse --cap grants
     let mut grants = Vec::new();
-    for s in cap_strs {
+    for s in &a.caps {
         grants.push(capability::CapGrant::parse(s)?);
     }
 
     // Load base capabilities from Caskfile or defaults
-    let base_caps = if let Some(cf_path) = &caskfile {
+    let base_caps = if let Some(cf_path) = &a.caskfile {
         let content = std::fs::read_to_string(cf_path)?;
         let cf: capability::Caskfile = toml::from_str(&content)?;
         cf.capabilities
@@ -205,28 +217,26 @@ fn cmd_run(
     };
 
     // Resolve all capabilities
-    let resolved = capability::ResolvedCaps::from_parts(&base_caps, &grants, volumes, env_vars, net);
+    let resolved =
+        capability::ResolvedCaps::from_parts(&base_caps, &grants, &a.volumes, &a.env_vars, a.net);
 
     let limits = capability::Limits {
-        fuel: if fuel == 0 { None } else { Some(fuel) },
-        wall_time_secs: Some(timeout),
+        fuel: if a.fuel == 0 { None } else { Some(a.fuel) },
+        wall_time_secs: Some(a.timeout),
         memory_mb: Some(256),
     };
 
     // Check bwrap if requested
-    if bwrap && !sandbox::bwrap_available() {
+    if a.bwrap && !sandbox::bwrap_available() {
         anyhow::bail!("--bwrap requested but bubblewrap is not installed");
     }
 
     // Create container record
-    let container_name = name.unwrap_or_else(|| {
-        let stem = wasm_path
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy();
+    let container_name = a.name.unwrap_or_else(|| {
+        let stem = wasm_path.file_stem().unwrap_or_default().to_string_lossy();
         format!("{stem}-{}", &uuid::Uuid::new_v4().to_string()[..8])
     });
-    let mut ctr = container::Container::new(&container_name, image, cap_strs);
+    let mut ctr = container::Container::new(&container_name, &a.image, &a.caps);
     let store = container::ContainerStore::new()?;
 
     // Print container ID (like docker)
@@ -238,20 +248,25 @@ fn cmd_run(
     if !resolved.fs_mounts.is_empty() {
         for m in &resolved.fs_mounts {
             let mode = if m.writable { "rw" } else { "ro" };
-            eprintln!("[cask]   fs: {} -> {} ({})", m.host.display(), m.guest, mode);
+            eprintln!(
+                "[cask]   fs: {} -> {} ({})",
+                m.host.display(),
+                m.guest,
+                mode
+            );
         }
     }
     if !resolved.net_rules.is_empty() {
         eprintln!("[cask]   net: {:?}", resolved.net_rules);
     }
     if resolved.fs_mounts.is_empty() && resolved.net_rules.is_empty() {
-        eprintln!("[cask]   (no capabilities granted — fully isolated)");
+        eprintln!("[cask]   (no capabilities granted, fully isolated)");
     }
     eprintln!();
 
     // Run
     let rt = runtime::SandboxRuntime::new(limits.fuel.is_some())?;
-    match rt.run(&wasm_path, &resolved, &limits, args) {
+    match rt.run(&wasm_path, &resolved, &limits, &a.args) {
         Ok(()) => {
             ctr.status = container::ContainerStatus::Exited(0);
             store.save(&ctr)?;
@@ -270,8 +285,8 @@ fn cmd_ps(all: bool) -> anyhow::Result<()> {
     let containers = store.list()?;
 
     println!(
-        "{:<14} {:<20} {:<20} {:<22} {}",
-        "CONTAINER ID", "NAME", "STATUS", "CREATED", "IMAGE"
+        "{:<14} {:<20} {:<20} {:<22} IMAGE",
+        "CONTAINER ID", "NAME", "STATUS", "CREATED"
     );
     for c in &containers {
         if !all && !matches!(c.status, container::ContainerStatus::Running) {
@@ -311,7 +326,10 @@ fn cmd_rm(id: &str) -> anyhow::Result<()> {
     let store = container::ContainerStore::new()?;
     let c = store.load(id)?;
     if matches!(c.status, container::ContainerStatus::Running) {
-        anyhow::bail!("Cannot remove running container {}. Stop it first.", c.short_id);
+        anyhow::bail!(
+            "Cannot remove running container {}. Stop it first.",
+            c.short_id
+        );
     }
     store.remove(&c.id)?;
     println!("{}", c.short_id);
@@ -329,7 +347,7 @@ fn cmd_images() -> anyhow::Result<()> {
     let store = image::ImageStore::new()?;
     let images = store.list()?;
 
-    println!("{:<20} {:<12} {}", "NAME", "SIZE", "PATH");
+    println!("{:<20} {:<12} PATH", "NAME", "SIZE");
     for img in &images {
         println!(
             "{:<20} {:<12} {}",
@@ -397,20 +415,20 @@ fn cmd_build(context: &str, file: &str) -> anyhow::Result<()> {
         entrypoint.display()
     );
 
-    let image_name = cf
-        .sandbox
-        .name
-        .unwrap_or_else(|| {
-            entrypoint
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string()
-        });
+    let image_name = cf.sandbox.name.unwrap_or_else(|| {
+        entrypoint
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    });
 
     // If it's a Rust source file, compile to WASM
     if entrypoint.extension().is_some_and(|e| e == "rs") {
-        println!("[cask] Compiling {} -> wasm32-wasip1...", entrypoint.display());
+        println!(
+            "[cask] Compiling {} -> wasm32-wasip1...",
+            entrypoint.display()
+        );
         let wasm_out = entrypoint.with_extension("wasm");
         let output = std::process::Command::new("rustc")
             .args(["--target", "wasm32-wasip1", "--edition", "2021", "-o"])
@@ -426,11 +444,19 @@ fn cmd_build(context: &str, file: &str) -> anyhow::Result<()> {
 
         let store = image::ImageStore::new()?;
         let img = store.import(&image_name, &wasm_out)?;
-        println!("[cask] Image '{}' ready ({})", img.name, human_size(img.size));
+        println!(
+            "[cask] Image '{}' ready ({})",
+            img.name,
+            human_size(img.size)
+        );
     } else if entrypoint.extension().is_some_and(|e| e == "wasm") {
         let store = image::ImageStore::new()?;
         let img = store.import(&image_name, &entrypoint)?;
-        println!("[cask] Image '{}' ready ({})", img.name, human_size(img.size));
+        println!(
+            "[cask] Image '{}' ready ({})",
+            img.name,
+            human_size(img.size)
+        );
     } else {
         anyhow::bail!(
             "Don't know how to build '{}'. Supported: .rs, .wasm",
@@ -447,7 +473,14 @@ fn cmd_info() -> anyhow::Result<()> {
     println!("Runtime:     wasmtime 43");
     println!("WASI:        preview 1 (wasm32-wasip1)");
     println!("Data dir:    {}", container::cask_home().display());
-    println!("Bubblewrap:  {}", if sandbox::bwrap_available() { "available" } else { "not found" });
+    println!(
+        "Bubblewrap:  {}",
+        if sandbox::bwrap_available() {
+            "available"
+        } else {
+            "not found"
+        }
+    );
     println!();
 
     // Check wasm target
@@ -458,7 +491,11 @@ fn cmd_info() -> anyhow::Result<()> {
         .unwrap_or(false);
     println!(
         "wasm32-wasip1 target: {}",
-        if has_target { "installed" } else { "not installed (run: rustup target add wasm32-wasip1)" }
+        if has_target {
+            "installed"
+        } else {
+            "not installed (run: rustup target add wasm32-wasip1)"
+        }
     );
 
     println!();

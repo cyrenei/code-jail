@@ -60,10 +60,7 @@ impl SandboxRuntime {
         // Filesystem mounts (preopened directories)
         for mount in &caps.fs_mounts {
             if !mount.host.exists() {
-                anyhow::bail!(
-                    "Mount source does not exist: {}",
-                    mount.host.display()
-                );
+                anyhow::bail!("Mount source does not exist: {}", mount.host.display());
             }
             let dir_perms = if mount.writable {
                 DirPerms::all()
@@ -120,7 +117,7 @@ impl SandboxRuntime {
         let start = Instant::now();
         let wall_limit = limits
             .wall_time_secs
-            .map(|s| Duration::from_secs(s))
+            .map(Duration::from_secs)
             .unwrap_or(Duration::from_secs(3600));
 
         // Get the default export (_start for WASI command modules)

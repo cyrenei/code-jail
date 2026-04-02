@@ -92,10 +92,10 @@ impl ContainerStore {
         for entry in std::fs::read_dir(&self.dir)? {
             let entry = entry?;
             let json = std::fs::read_to_string(entry.path())?;
-            if let Ok(c) = serde_json::from_str::<Container>(&json) {
-                if c.name == id_or_prefix {
-                    return Ok(c);
-                }
+            if let Ok(c) = serde_json::from_str::<Container>(&json)
+                && c.name == id_or_prefix
+            {
+                return Ok(c);
             }
         }
         anyhow::bail!("Container not found: {id_or_prefix}")

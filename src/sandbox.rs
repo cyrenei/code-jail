@@ -11,7 +11,8 @@ pub fn bwrap_available() -> bool {
 /// Build a bubblewrap command that wraps execution of the inner command.
 ///
 /// The outer sandbox uses Linux namespaces to isolate the wasmtime process
-/// itself — defense in depth on top of WASM's capability isolation.
+/// itself, adding defense in depth on top of WASM's capability isolation.
+#[allow(dead_code)]
 pub fn build_bwrap_command(
     inner_cmd: &str,
     inner_args: &[&str],
@@ -38,7 +39,13 @@ pub fn build_bwrap_command(
     cmd.arg("--proc").arg("/proc");
 
     // System directories needed by wasmtime (read-only)
-    for sys_dir in &["/usr", "/lib", "/lib64", "/etc/alternatives", "/etc/ld.so.cache"] {
+    for sys_dir in &[
+        "/usr",
+        "/lib",
+        "/lib64",
+        "/etc/alternatives",
+        "/etc/ld.so.cache",
+    ] {
         if std::path::Path::new(sys_dir).exists() {
             cmd.arg("--ro-bind").arg(sys_dir).arg(sys_dir);
         }

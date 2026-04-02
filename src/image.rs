@@ -38,7 +38,9 @@ impl ImageStore {
         if stored2.exists() {
             return Ok(stored2);
         }
-        anyhow::bail!("Image not found: {name_or_path}\nTry a path to a .wasm file or import one with `cask import`")
+        anyhow::bail!(
+            "Image not found: {name_or_path}\nTry a path to a .wasm file or import one with `cask import`"
+        )
     }
 
     /// Import a .wasm file into the image store

@@ -14,3 +14,8 @@ toml = "0.8"
 uuid = { version = "1", features = ["v4", "serde"] }
 wasmtime = "43"
 wasmtime-wasi = "43"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
