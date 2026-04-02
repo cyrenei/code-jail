@@ -6,12 +6,15 @@ WORKDIR /build
 # Install the WASM compilation target (needed for `containment build`)
 RUN rustup target add wasm32-wasip1
 
+# Copy arbiter crates (path dependencies)
+COPY arbiter-mcp-firewall/ /build/arbiter-mcp-firewall/
+
 # Copy manifests first for better layer caching
 COPY Cargo.toml Cargo.lock ./
 
 # Create a dummy src to pre-build dependencies
 RUN mkdir src && echo 'fn main() {}' > src/main.rs && \
-    cargo build --release && \
+    cargo build --release 2>/dev/null || true && \
     rm -rf src target/release/containment target/release/deps/containment-*
 
 # Copy actual source and build
@@ -26,6 +29,9 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/target/release/containment /usr/local/bin/containment
+
+# Copy example arbiter policy
+COPY examples/arbiter-policy.toml /etc/containment/arbiter-policy.toml
 
 # Default data directory for images/containers
 RUN mkdir -p /data

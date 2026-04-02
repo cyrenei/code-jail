@@ -1,3 +1,5 @@
 target/
 .git
 docs/_build
+arbiter-mcp-firewall/.git
+arbiter-mcp-firewall/target
