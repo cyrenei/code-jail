@@ -1,14 +1,14 @@
 CLI reference
 =============
 
-cask run
---------
+containment run
+---------------
 
 Run a WASM module in a capability-restricted sandbox.
 
 .. code-block:: text
 
-   cask run [OPTIONS] <IMAGE> [-- <ARGS>...]
+   containment run [OPTIONS] <IMAGE> [-- <ARGS>...]
 
 **Arguments:**
 
@@ -31,8 +31,8 @@ Run a WASM module in a capability-restricted sandbox.
      - Set an environment variable. If only KEY is given, inherits from host.
    * - ``--net``
      - Allow all network access.
-   * - ``-f, --caskfile <PATH>``
-     - Load capabilities from a Caskfile. See :doc:`caskfile`.
+   * - ``-f, --containmentfile <PATH>``
+     - Load capabilities from a Containmentfile. See :doc:`containmentfile`.
    * - ``--name <NAME>``
      - Set the container name (default: auto-generated).
    * - ``--fuel <N>``
@@ -49,115 +49,115 @@ Run a WASM module in a capability-restricted sandbox.
 .. code-block:: bash
 
    # Minimal: just stdout/stderr
-   $ cask run hello.wasm
+   $ containment run hello.wasm
 
    # With filesystem and network
-   $ cask run agent.wasm \
+   $ containment run agent.wasm \
        --cap fs:read:/project \
        --cap net:api.openai.com:443 \
        -v /tmp/out:/output \
        -e API_KEY
 
-   # With a Caskfile
-   $ cask run agent.wasm -f Caskfile.toml
+   # With a Containmentfile
+   $ containment run agent.wasm -f Containmentfile.toml
 
-cask build
-----------
+containment build
+-----------------
 
-Build an image from a Caskfile.
+Build an image from a Containmentfile.
 
 .. code-block:: text
 
-   cask build [DIR] [-f FILE]
+   containment build [DIR] [-f FILE]
 
-Reads the Caskfile, compiles the entrypoint (if it is a ``.rs`` file), and imports the result as a named image.
+Reads the Containmentfile, compiles the entrypoint (if it is a ``.rs`` file), and imports the result as a named image.
 
 **Options:**
 
 - ``DIR`` - Build context directory (default: ``.``)
-- ``-f, --file <FILE>`` - Caskfile name (default: ``Caskfile.toml``)
+- ``-f, --file <FILE>`` - Containmentfile name (default: ``Containmentfile.toml``)
 
-cask ps
--------
+containment ps
+--------------
 
 List containers.
 
 .. code-block:: text
 
-   cask ps [-a]
+   containment ps [-a]
 
 By default, only shows running containers. Pass ``-a`` to include stopped and failed ones.
 
-cask stop
----------
+containment stop
+----------------
 
 Stop a running container by sending SIGTERM.
 
 .. code-block:: text
 
-   cask stop <ID>
+   containment stop <ID>
 
 Accepts a full container ID, short ID, or container name.
 
-cask rm
--------
+containment rm
+--------------
 
 Remove a stopped container record.
 
 .. code-block:: text
 
-   cask rm <ID>
+   containment rm <ID>
 
-cask prune
-----------
+containment prune
+-----------------
 
 Remove all stopped and failed container records.
 
 .. code-block:: text
 
-   cask prune
+   containment prune
 
-cask images
------------
+containment images
+------------------
 
-List images in the local store (``~/.cask/images/``).
+List images in the local store (``~/.containment/images/``).
 
 .. code-block:: text
 
-   cask images
+   containment images
 
-cask import
------------
+containment import
+------------------
 
 Import a ``.wasm`` file as a named image.
 
 .. code-block:: text
 
-   cask import <NAME> <PATH>
+   containment import <NAME> <PATH>
 
-cask rmi
---------
+containment rmi
+---------------
 
 Remove an image from the local store.
 
 .. code-block:: text
 
-   cask rmi <NAME>
+   containment rmi <NAME>
 
-cask inspect
-------------
+containment inspect
+-------------------
 
 Show metadata about a WASM module: file size, exports, and WASI imports.
 
 .. code-block:: text
 
-   cask inspect <IMAGE>
+   containment inspect <IMAGE>
 
-cask info
----------
+containment info
+----------------
 
 Show system information: wasmtime version, data directory, available features.
 
 .. code-block:: text
 
-   cask info
+   containment info

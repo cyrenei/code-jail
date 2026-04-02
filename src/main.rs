@@ -10,7 +10,7 @@ mod sandbox;
 
 #[derive(Parser)]
 #[command(
-    name = "cask",
+    name = "containment",
     version,
     about = "WASM sandbox with Docker-like commands.\n\n\
              Run untrusted code with deny-by-default capabilities.\n\
@@ -40,9 +40,9 @@ enum Commands {
         #[arg(long)]
         name: Option<String>,
 
-        /// Caskfile path for capability manifest
-        #[arg(short = 'f', long)]
-        caskfile: Option<String>,
+        /// Containmentfile path for capability manifest
+        #[arg(short = 'f', long = "containmentfile")]
+        containmentfile: Option<String>,
 
         /// CPU fuel limit (0 = unlimited)
         #[arg(long, default_value = "1000000000")]
@@ -118,14 +118,14 @@ enum Commands {
         image: String,
     },
 
-    /// Build from a Caskfile.toml
+    /// Build from a Containmentfile.toml
     Build {
         /// Build context directory
         #[arg(default_value = ".")]
         context: String,
 
-        /// Caskfile path (relative to context)
-        #[arg(short = 'f', long, default_value = "Caskfile.toml")]
+        /// Containmentfile path (relative to context)
+        #[arg(short = 'f', long, default_value = "Containmentfile.toml")]
         file: String,
     },
 
@@ -141,7 +141,7 @@ fn main() -> anyhow::Result<()> {
             caps,
             detach,
             name,
-            caskfile,
+            containmentfile,
             fuel,
             timeout,
             net,
@@ -154,7 +154,7 @@ fn main() -> anyhow::Result<()> {
             caps,
             _detach: detach,
             name,
-            caskfile,
+            containmentfile,
             fuel,
             timeout,
             net,
@@ -181,7 +181,7 @@ struct RunArgs {
     caps: Vec<String>,
     _detach: bool,
     name: Option<String>,
-    caskfile: Option<String>,
+    containmentfile: Option<String>,
     fuel: u64,
     timeout: u64,
     net: bool,
@@ -202,10 +202,10 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
         grants.push(capability::CapGrant::parse(s)?);
     }
 
-    // Load base capabilities from Caskfile or defaults
-    let base_caps = if let Some(cf_path) = &a.caskfile {
+    // Load base capabilities from Containmentfile or defaults
+    let base_caps = if let Some(cf_path) = &a.containmentfile {
         let content = std::fs::read_to_string(cf_path)?;
-        let cf: capability::Caskfile = toml::from_str(&content)?;
+        let cf: capability::Containmentfile = toml::from_str(&content)?;
         cf.capabilities
     } else {
         capability::Capabilities {
@@ -243,13 +243,13 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
     println!("{}", ctr.short_id);
 
     // Print capability summary
-    eprintln!("[cask] Sandbox: {}", container_name);
-    eprintln!("[cask] Image:   {}", wasm_path.display());
+    eprintln!("[containment] Sandbox: {}", container_name);
+    eprintln!("[containment] Image:   {}", wasm_path.display());
     if !resolved.fs_mounts.is_empty() {
         for m in &resolved.fs_mounts {
             let mode = if m.writable { "rw" } else { "ro" };
             eprintln!(
-                "[cask]   fs: {} -> {} ({})",
+                "[containment]   fs: {} -> {} ({})",
                 m.host.display(),
                 m.guest,
                 mode
@@ -257,10 +257,10 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
         }
     }
     if !resolved.net_rules.is_empty() {
-        eprintln!("[cask]   net: {:?}", resolved.net_rules);
+        eprintln!("[containment]   net: {:?}", resolved.net_rules);
     }
     if resolved.fs_mounts.is_empty() && resolved.net_rules.is_empty() {
-        eprintln!("[cask]   (no capabilities granted, fully isolated)");
+        eprintln!("[containment]   (no capabilities granted, fully isolated)");
     }
     eprintln!();
 
@@ -302,7 +302,7 @@ fn cmd_ps(all: bool) -> anyhow::Result<()> {
         );
     }
     if containers.is_empty() {
-        eprintln!("No containers found. Run one with: cask run <image.wasm>");
+        eprintln!("No containers found. Run one with: containment run <image.wasm>");
     }
     Ok(())
 }
@@ -357,7 +357,7 @@ fn cmd_images() -> anyhow::Result<()> {
         );
     }
     if images.is_empty() {
-        eprintln!("No images. Import one with: cask import <name> <path.wasm>");
+        eprintln!("No images. Import one with: containment import <name> <path.wasm>");
     }
     Ok(())
 }
@@ -398,15 +398,15 @@ fn cmd_inspect(image: &str) -> anyhow::Result<()> {
 }
 
 fn cmd_build(context: &str, file: &str) -> anyhow::Result<()> {
-    let caskfile_path = Path::new(context).join(file);
+    let containmentfile_path = Path::new(context).join(file);
     anyhow::ensure!(
-        caskfile_path.exists(),
-        "Caskfile not found: {}",
-        caskfile_path.display()
+        containmentfile_path.exists(),
+        "Containmentfile not found: {}",
+        containmentfile_path.display()
     );
 
-    let content = std::fs::read_to_string(&caskfile_path)?;
-    let cf: capability::Caskfile = toml::from_str(&content)?;
+    let content = std::fs::read_to_string(&containmentfile_path)?;
+    let cf: capability::Containmentfile = toml::from_str(&content)?;
 
     let entrypoint = Path::new(context).join(&cf.sandbox.entrypoint);
     anyhow::ensure!(
@@ -426,7 +426,7 @@ fn cmd_build(context: &str, file: &str) -> anyhow::Result<()> {
     // If it's a Rust source file, compile to WASM
     if entrypoint.extension().is_some_and(|e| e == "rs") {
         println!(
-            "[cask] Compiling {} -> wasm32-wasip1...",
+            "[containment] Compiling {} -> wasm32-wasip1...",
             entrypoint.display()
         );
         let wasm_out = entrypoint.with_extension("wasm");
@@ -440,12 +440,12 @@ fn cmd_build(context: &str, file: &str) -> anyhow::Result<()> {
             let stderr = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!("Compilation failed:\n{stderr}");
         }
-        println!("[cask] Compiled: {}", wasm_out.display());
+        println!("[containment] Compiled: {}", wasm_out.display());
 
         let store = image::ImageStore::new()?;
         let img = store.import(&image_name, &wasm_out)?;
         println!(
-            "[cask] Image '{}' ready ({})",
+            "[containment] Image '{}' ready ({})",
             img.name,
             human_size(img.size)
         );
@@ -453,7 +453,7 @@ fn cmd_build(context: &str, file: &str) -> anyhow::Result<()> {
         let store = image::ImageStore::new()?;
         let img = store.import(&image_name, &entrypoint)?;
         println!(
-            "[cask] Image '{}' ready ({})",
+            "[containment] Image '{}' ready ({})",
             img.name,
             human_size(img.size)
         );
@@ -468,11 +468,11 @@ fn cmd_build(context: &str, file: &str) -> anyhow::Result<()> {
 }
 
 fn cmd_info() -> anyhow::Result<()> {
-    println!("cask {}", env!("CARGO_PKG_VERSION"));
+    println!("containment {}", env!("CARGO_PKG_VERSION"));
     println!();
     println!("Runtime:     wasmtime 43");
     println!("WASI:        preview 1 (wasm32-wasip1)");
-    println!("Data dir:    {}", container::cask_home().display());
+    println!("Data dir:    {}", container::containment_home().display());
     println!(
         "Bubblewrap:  {}",
         if sandbox::bwrap_available() {

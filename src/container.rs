@@ -60,7 +60,7 @@ pub struct ContainerStore {
 
 impl ContainerStore {
     pub fn new() -> anyhow::Result<Self> {
-        let dir = cask_home().join("containers");
+        let dir = containment_home().join("containers");
         std::fs::create_dir_all(&dir)?;
         Ok(Self { dir })
     }
@@ -138,12 +138,12 @@ impl ContainerStore {
     }
 }
 
-pub fn cask_home() -> PathBuf {
-    std::env::var("CASK_HOME")
+pub fn containment_home() -> PathBuf {
+    std::env::var("CONTAINMENT_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             std::env::var("HOME")
-                .map(|h| PathBuf::from(h).join(".cask"))
-                .unwrap_or_else(|_| PathBuf::from("/tmp/.cask"))
+                .map(|h| PathBuf::from(h).join(".containment"))
+                .unwrap_or_else(|_| PathBuf::from("/tmp/.containment"))
         })
 }

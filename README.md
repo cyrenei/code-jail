@@ -1,4 +1,4 @@
-# cask
+# containment
 
 A WASM sandbox that works like Docker. Run untrusted programs with deny-by-default capabilities.
 
@@ -23,28 +23,28 @@ rustup target add wasm32-wasip1
 ```bash
 # Run a WASM module in a fully isolated sandbox.
 # No filesystem, no network, no env vars. Just stdout/stderr.
-cask run program.wasm
+containment run program.wasm
 
 # Give it read access to your project directory
-cask run agent.wasm --cap fs:read:/home/you/project
+containment run agent.wasm --cap fs:read:/home/you/project
 
 # Mount a working directory and allow one API endpoint
-cask run agent.wasm \
+containment run agent.wasm \
   -v ./project:/workspace \
   --cap net:api.openai.com:443 \
   -e API_KEY
 
 # Build a Rust source file into a WASM image
-cask build .
+containment build .
 
 # List your images and containers
-cask images
-cask ps -a
+containment images
+containment ps -a
 ```
 
 ## Capability model
 
-Cask uses a deny-by-default capability model. When you run a module with no flags, it gets nothing. Every permission is an explicit grant.
+Containment uses a deny-by-default capability model. When you run a module with no flags, it gets nothing. Every permission is an explicit grant.
 
 | Flag | What it grants |
 |------|---------------|
@@ -73,22 +73,22 @@ When a program exceeds its fuel budget, it gets terminated immediately. The time
 ## CLI reference
 
 ```
-cask run <image> [flags] [-- args...]    Run a WASM module in a sandbox
-cask build [dir] [-f Caskfile.toml]      Build from a Caskfile
-cask ps [-a]                             List containers
-cask stop <id>                           Stop a running container
-cask rm <id>                             Remove a stopped container
-cask prune                               Remove all stopped containers
-cask images                              List images
-cask import <name> <path.wasm>           Import a WASM module as an image
-cask rmi <name>                          Remove an image
-cask inspect <image>                     Show module exports and imports
-cask info                                Show system info and capabilities
+containment run <image> [flags] [-- args...]    Run a WASM module in a sandbox
+containment build [dir] [-f Containmentfile.toml]      Build from a Containmentfile
+containment ps [-a]                             List containers
+containment stop <id>                           Stop a running container
+containment rm <id>                             Remove a stopped container
+containment prune                               Remove all stopped containers
+containment images                              List images
+containment import <name> <path.wasm>           Import a WASM module as an image
+containment rmi <name>                          Remove an image
+containment inspect <image>                     Show module exports and imports
+containment info                                Show system info and capabilities
 ```
 
-## Caskfile
+## Containmentfile
 
-A Caskfile is a TOML manifest that declares what a sandbox is allowed to do. Think of it like a Dockerfile but for permissions.
+A Containmentfile is a TOML manifest that declares what a sandbox is allowed to do. Think of it like a Dockerfile but for permissions.
 
 ```toml
 [sandbox]
@@ -110,7 +110,7 @@ wall_time_secs = 300
 memory_mb = 512
 ```
 
-Use it with `cask run <image> -f Caskfile.toml` or build with `cask build`.
+Use it with `containment run <image> -f Containmentfile.toml` or build with `containment build`.
 
 ## Security model
 

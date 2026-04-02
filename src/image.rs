@@ -9,14 +9,14 @@ pub struct Image {
     pub size: u64,
 }
 
-/// Local image store at ~/.cask/images/
+/// Local image store at ~/.containment/images/
 pub struct ImageStore {
     dir: PathBuf,
 }
 
 impl ImageStore {
     pub fn new() -> anyhow::Result<Self> {
-        let dir = crate::container::cask_home().join("images");
+        let dir = crate::container::containment_home().join("images");
         std::fs::create_dir_all(&dir)?;
         Ok(Self { dir })
     }
@@ -39,7 +39,7 @@ impl ImageStore {
             return Ok(stored2);
         }
         anyhow::bail!(
-            "Image not found: {name_or_path}\nTry a path to a .wasm file or import one with `cask import`"
+            "Image not found: {name_or_path}\nTry a path to a .wasm file or import one with `containment import`"
         )
     }
 

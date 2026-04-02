@@ -65,5 +65,5 @@ jobs:
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: cask-linux-x86_64
-          path: target/release/cask
+          name: containment-linux-x86_64
+          path: target/release/containment

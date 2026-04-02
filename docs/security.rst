@@ -1,12 +1,12 @@
 Security model
 ==============
 
-Cask exists to run untrusted code safely. This page describes what it protects against, what it does not, and how the protection works.
+Containment exists to run untrusted code safely. This page describes what it protects against, what it does not, and how the protection works.
 
 Threat model
 ------------
 
-Cask is designed for this scenario: you have a program you do not fully trust, and you want to run it without giving it access to your system. Examples:
+Containment is designed for this scenario: you have a program you do not fully trust, and you want to run it without giving it access to your system. Examples:
 
 - An AI coding agent that might read your SSH keys
 - A build script from an unfamiliar project
@@ -74,7 +74,7 @@ Comparison with other isolation tools
      - Isolation mechanism
      - Compatibility
      - Overhead
-   * - **cask (WASM)**
+   * - **containment (WASM)**
      - Capability-based (deny by default)
      - Programs must target wasm32-wasip1
      - ~1.5x native
@@ -95,9 +95,9 @@ Comparison with other isolation tools
      - Any Linux binary
      - ~1x native
 
-Cask trades compatibility (programs must be compiled to WASM) for a stronger default security posture (deny by default, capability-based). For programs that can target WASM, this is a good trade.
+Containment trades compatibility (programs must be compiled to WASM) for a stronger default security posture (deny by default, capability-based). For programs that can target WASM, this is a good trade.
 
 Reporting vulnerabilities
 -------------------------
 
-If you find a security issue in cask, please open an issue on GitHub. If the issue is sensitive (sandbox escape), email the maintainers instead of posting publicly.
+If you find a security issue in containment, please open an issue on GitHub. If the issue is sensitive (sandbox escape), email the maintainers instead of posting publicly.

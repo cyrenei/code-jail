@@ -4,7 +4,7 @@ Installation
 From source
 -----------
 
-Cask is a Rust project. You need a working Rust toolchain (stable is fine).
+Containment is a Rust project. You need a working Rust toolchain (stable is fine).
 
 .. code-block:: bash
 
@@ -12,12 +12,12 @@ Cask is a Rust project. You need a working Rust toolchain (stable is fine).
    $ cd agent-wasm-containers
    $ cargo install --path .
 
-This puts the ``cask`` binary in ``~/.cargo/bin/``. Make sure that is in your PATH.
+This puts the ``containment`` binary in ``~/.cargo/bin/``. Make sure that is in your PATH.
 
 WASM compilation target
 -----------------------
 
-If you want to build Rust source files into WASM modules (using ``cask build``), you also need the wasm32-wasip1 compilation target:
+If you want to build Rust source files into WASM modules (using ``containment build``), you also need the wasm32-wasip1 compilation target:
 
 .. code-block:: bash
 
@@ -48,6 +48,6 @@ Verify the install
 
 .. code-block:: bash
 
-   $ cask info
+   $ containment info
 
 This shows your runtime version, available features, and whether the wasm32-wasip1 target is installed.

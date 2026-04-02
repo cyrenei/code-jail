@@ -1,7 +1,7 @@
-Caskfile reference
-==================
+Containmentfile reference
+=========================
 
-A Caskfile is a TOML file that declares the capabilities and limits for a sandbox. It is the equivalent of a Dockerfile, but for permissions rather than build steps.
+A Containmentfile is a TOML file that declares the capabilities and limits for a sandbox. It is the equivalent of a Dockerfile, but for permissions rather than build steps.
 
 Format
 ------
@@ -102,17 +102,17 @@ Sections
 Usage
 -----
 
-Build an image from a Caskfile:
+Build an image from a Containmentfile:
 
 .. code-block:: bash
 
-   $ cask build .
-   $ cask build /path/to/project -f custom-caskfile.toml
+   $ containment build .
+   $ containment build /path/to/project -f custom-containmentfile.toml
 
-Run with a Caskfile (apply its capabilities):
+Run with a Containmentfile (apply its capabilities):
 
 .. code-block:: bash
 
-   $ cask run my-image -f Caskfile.toml
+   $ containment run my-image -f Containmentfile.toml
 
-When you use ``-f``, the Caskfile capabilities are the base set. Any ``--cap`` flags you add on the command line are merged on top.
+When you use ``-f``, the Containmentfile capabilities are the base set. Any ``--cap`` flags you add on the command line are merged on top.

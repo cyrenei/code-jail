@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// Caskfile — capability manifest for a sandbox (like Dockerfile)
+/// Containmentfile — capability manifest for a sandbox (like Dockerfile)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Caskfile {
+pub struct Containmentfile {
     pub sandbox: SandboxMeta,
     #[serde(default)]
     pub capabilities: Capabilities,
@@ -118,7 +118,7 @@ impl CapGrant {
     }
 }
 
-/// Build the complete capability set from Caskfile + CLI overrides
+/// Build the complete capability set from Containmentfile + CLI overrides
 pub struct ResolvedCaps {
     pub fs_mounts: Vec<FsMount>,
     pub net_rules: Vec<String>,
@@ -138,7 +138,7 @@ impl ResolvedCaps {
         let mut net_rules: Vec<String> = base.net_allow.clone();
         let mut env_vars: Vec<(String, String)> = Vec::new();
 
-        // From Caskfile
+        // From Containmentfile
         for path in &base.fs_read {
             fs_mounts.push(FsMount {
                 host: PathBuf::from(path),
@@ -154,7 +154,7 @@ impl ResolvedCaps {
             });
         }
 
-        // Resolve Caskfile env vars from host
+        // Resolve Containmentfile env vars from host
         if base.inherit_env {
             for (k, v) in std::env::vars() {
                 env_vars.push((k, v));

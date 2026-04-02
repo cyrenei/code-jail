@@ -1,9 +1,9 @@
 Capabilities
 ============
 
-Cask uses a deny-by-default capability model. When a WASM module starts, it has no access to anything on the host. You grant capabilities explicitly with ``--cap`` flags, volume mounts, and environment flags.
+Containment uses a deny-by-default capability model. When a WASM module starts, it has no access to anything on the host. You grant capabilities explicitly with ``--cap`` flags, volume mounts, and environment flags.
 
-This is fundamentally different from Docker, where containers share the host kernel and isolation is achieved by hiding things. In cask, there is nothing to hide because the program starts with nothing.
+This is fundamentally different from Docker, where containers share the host kernel and isolation is achieved by hiding things. In containment, there is nothing to hide because the program starts with nothing.
 
 Capability types
 ----------------
@@ -54,7 +54,7 @@ Without env grants, the program sees an empty environment. Not even HOME or PATH
 Stdio
 ^^^^^
 
-By default, cask passes stdin, stdout, and stderr through to the host terminal. You can control this in a Caskfile:
+By default, containment passes stdin, stdout, and stderr through to the host terminal. You can control this in a Containmentfile:
 
 .. code-block:: toml
 
@@ -70,7 +70,7 @@ Capabilities compose naturally. Each ``--cap`` flag adds to the set. Nothing is 
 
 .. code-block:: bash
 
-   cask run agent.wasm \
+   containment run agent.wasm \
      --cap fs:read:/project \
      --cap fs:write:/project/output \
      --cap fs:write:/tmp \
@@ -87,16 +87,16 @@ This gives the program:
 - Three environment variables (HOME, API_KEY, EDITOR)
 - Nothing else
 
-Caskfile capabilities
----------------------
+Containmentfile capabilities
+-----------------------------
 
-For reproducibility, put capabilities in a Caskfile instead of passing flags:
+For reproducibility, put capabilities in a Containmentfile instead of passing flags:
 
 .. code-block:: bash
 
-   cask run agent.wasm -f Caskfile.toml
+   containment run agent.wasm -f Containmentfile.toml
 
-CLI flags and Caskfile capabilities are merged. CLI grants add to whatever the Caskfile declares. See :doc:`caskfile` for the full format.
+CLI flags and Containmentfile capabilities are merged. CLI grants add to whatever the Containmentfile declares. See :doc:`containmentfile` for the full format.
 
 How it works under the hood
 ---------------------------

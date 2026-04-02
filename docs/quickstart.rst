@@ -8,11 +8,11 @@ The simplest thing you can do is run a WASM module:
 
 .. code-block:: bash
 
-   $ cask run hello.wasm
+   $ containment run hello.wasm
    a1b2c3d4-e5f
-   [cask] Sandbox: hello-8f3a2b1c
-   [cask] Image:   /path/to/hello.wasm
-   [cask]   (no capabilities granted, fully isolated)
+   [containment] Sandbox: hello-8f3a2b1c
+   [containment] Image:   /path/to/hello.wasm
+   [containment]   (no capabilities granted, fully isolated)
 
    Hello from WASM sandbox!
 
@@ -26,19 +26,19 @@ Most programs need to read or write files. Use ``--cap`` to grant specific acces
 .. code-block:: bash
 
    # Read-only access to a directory
-   $ cask run analyzer.wasm --cap fs:read:/home/you/project
+   $ containment run analyzer.wasm --cap fs:read:/home/you/project
 
    # Read+write access
-   $ cask run builder.wasm --cap fs:write:/tmp/output
+   $ containment run builder.wasm --cap fs:write:/tmp/output
 
    # Volume mount (Docker-style, always read+write)
-   $ cask run agent.wasm -v ./project:/workspace
+   $ containment run agent.wasm -v ./project:/workspace
 
 You can also grant network and environment access:
 
 .. code-block:: bash
 
-   $ cask run agent.wasm \
+   $ containment run agent.wasm \
        --cap net:api.openai.com:443 \
        -e API_KEY=sk-1234
 
@@ -55,7 +55,7 @@ If you have a Rust file, you can compile it to WASM and import it as an image in
    }
    EOF
 
-   $ cat > Caskfile.toml << 'EOF'
+   $ cat > Containmentfile.toml << 'EOF'
    [sandbox]
    name = "hello"
    entrypoint = "hello.rs"
@@ -64,11 +64,11 @@ If you have a Rust file, you can compile it to WASM and import it as an image in
    stdout = true
    EOF
 
-   $ cask build .
-   [cask] Compiling hello.rs -> wasm32-wasip1...
-   [cask] Image 'hello' ready (1.9 MB)
+   $ containment build .
+   [containment] Compiling hello.rs -> wasm32-wasip1...
+   [containment] Image 'hello' ready (1.9 MB)
 
-   $ cask run hello
+   $ containment run hello
 
 Managing images and containers
 ------------------------------
@@ -77,23 +77,23 @@ Import a pre-compiled WASM file:
 
 .. code-block:: bash
 
-   $ cask import myapp /path/to/app.wasm
+   $ containment import myapp /path/to/app.wasm
    Imported: myapp (2.1 MB)
 
 List images:
 
 .. code-block:: bash
 
-   $ cask images
+   $ containment images
    NAME                 SIZE         PATH
-   hello                1.9 MB       /home/you/.cask/images/hello.wasm
-   myapp                2.1 MB       /home/you/.cask/images/myapp.wasm
+   hello                1.9 MB       /home/you/.containment/images/hello.wasm
+   myapp                2.1 MB       /home/you/.containment/images/myapp.wasm
 
 See past runs:
 
 .. code-block:: bash
 
-   $ cask ps -a
+   $ containment ps -a
    CONTAINER ID   NAME            STATUS         CREATED              IMAGE
    a1b2c3d4-e5f   hello-8f3a2b1c  Exited (0)     2026-04-02 19:48:01  hello
 
@@ -101,7 +101,7 @@ Clean up:
 
 .. code-block:: bash
 
-   $ cask prune
+   $ containment prune
    Removed 5 stopped container(s)
 
 Inspect a module
@@ -111,9 +111,9 @@ See what a WASM module imports and exports:
 
 .. code-block:: bash
 
-   $ cask inspect hello
+   $ containment inspect hello
    Image:   hello
-   Path:    /home/you/.cask/images/hello.wasm
+   Path:    /home/you/.containment/images/hello.wasm
    Size:    1.9 MB
 
    Exports (3):
@@ -126,4 +126,4 @@ See what a WASM module imports and exports:
      wasi_snapshot_preview1::proc_exit (...)
      ...
 
-The imports tell you what WASI functions the module needs. If a module imports something cask does not support, it will fail at link time with a clear error.
+The imports tell you what WASI functions the module needs. If a module imports something containment does not support, it will fail at link time with a clear error.
