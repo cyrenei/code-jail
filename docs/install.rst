@@ -43,6 +43,29 @@ For the ``--bwrap`` flag (defense-in-depth namespace isolation), install bubblew
 
 This is optional. The WASM sandbox works fine without it.
 
+Docker
+------
+
+You can run containment in a Docker container. The image includes bubblewrap and the wasm32-wasip1 target.
+
+.. code-block:: bash
+
+   $ docker build -t containment .
+   $ docker run --rm containment info
+
+To run WASM modules from a host directory, mount it as a volume:
+
+.. code-block:: bash
+
+   $ docker run --rm -v ./workspace:/data/workspace containment run /data/workspace/program.wasm
+
+For ``--bwrap`` support inside Docker, grant the ``SYS_ADMIN`` capability:
+
+.. code-block:: bash
+
+   $ docker run --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
+       containment run --bwrap program.wasm
+
 Verify the install
 ------------------
 

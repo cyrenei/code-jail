@@ -139,6 +139,26 @@ Without explicit grants, a sandboxed program cannot:
 - WASI preview 1 only. Preview 2 (component model) support is planned.
 - No detached/background execution yet.
 
+## Docker
+
+```bash
+# Build the image
+docker build -t containment .
+
+# Run a command
+docker run --rm containment info
+
+# Run a WASM module from a host directory
+docker run --rm -v ./workspace:/data/workspace containment run /data/workspace/program.wasm
+
+# For --bwrap support, the container needs extra privileges:
+docker run --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
+  containment run --bwrap program.wasm
+
+# Or use docker compose
+docker compose run --rm containment info
+```
+
 ## Building from source
 
 ```bash

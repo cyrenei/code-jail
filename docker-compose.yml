@@ -1,0 +1,12 @@
+services:
+  containment:
+    build: .
+    image: containment:latest
+    volumes:
+      # Mount a host workspace directory into the container
+      - ./workspace:/data/workspace
+    # Required for --bwrap namespace isolation:
+    # cap_add:
+    #   - SYS_ADMIN
+    # security_opt:
+    #   - apparmor:unconfined
