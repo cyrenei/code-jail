@@ -1,0 +1,24 @@
+# Demo arbiter policy: reads allowed for everyone, writes only for build intents.
+
+[[policies]]
+id = "allow-reads"
+effect = "allow"
+allowed_tools = ["fs_read", "env_read"]
+
+[policies.agent_match]
+trust_level = "basic"
+
+[[policies]]
+id = "allow-writes-for-build-intent"
+effect = "allow"
+allowed_tools = ["fs_write"]
+
+[policies.agent_match]
+trust_level = "basic"
+
+[policies.intent_match]
+regex = "(?i)\\b(write|build|deploy)\\b"
+
+[[policies]]
+id = "deny-everything-else"
+effect = "deny"
