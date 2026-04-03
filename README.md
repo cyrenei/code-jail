@@ -11,7 +11,7 @@ Built on [wasmtime](https://wasmtime.dev/) (WASI preview 1). Written in Rust.
 The fastest way to install is the one-liner, which downloads a pre-built binary:
 
 ```bash
-curl -sSf https://raw.githubusercontent.com/cyrenei/containment/main/install.sh | sh
+curl -sSf https://raw.githubusercontent.com/cyrenei/code-jail/main/install.sh | sh
 ```
 
 This detects your OS and architecture, downloads the right binary from GitHub Releases, verifies the SHA256 checksum, and drops it into `~/.codejail/bin/`.
@@ -20,7 +20,7 @@ You can also pin a version or change the install directory:
 
 ```bash
 CODEJAIL_VERSION=v0.1.0 CODEJAIL_INSTALL_DIR=/usr/local/bin curl -sSf \
-  https://raw.githubusercontent.com/cyrenei/containment/main/install.sh | sh
+  https://raw.githubusercontent.com/cyrenei/code-jail/main/install.sh | sh
 ```
 
 ### Other install methods
@@ -28,7 +28,7 @@ CODEJAIL_VERSION=v0.1.0 CODEJAIL_INSTALL_DIR=/usr/local/bin curl -sSf \
 **Cargo** (if you already have Rust):
 
 ```bash
-git clone https://github.com/cyrenei/containment.git
+git clone https://github.com/cyrenei/code-jail.git
 cd containment
 cargo install --path .
 ```
@@ -261,7 +261,7 @@ docker compose run --rm codejail info
 ## Building from source
 
 ```bash
-git clone https://github.com/cyrenei/containment.git
+git clone https://github.com/cyrenei/code-jail.git
 cd containment
 cargo build --release
 

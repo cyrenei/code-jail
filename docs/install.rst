@@ -8,7 +8,7 @@ The fastest way to get codejail is the install script. It downloads a pre-built 
 
 .. code-block:: bash
 
-   $ curl -sSf https://raw.githubusercontent.com/cyrenei/containment/main/install.sh | sh
+   $ curl -sSf https://raw.githubusercontent.com/cyrenei/code-jail/main/install.sh | sh
 
 The script detects your OS (Linux, macOS) and architecture (amd64, arm64) automatically.
 
@@ -17,11 +17,11 @@ To pin a specific version or change the install directory:
 .. code-block:: bash
 
    $ CODEJAIL_VERSION=v0.1.0 curl -sSf \
-       https://raw.githubusercontent.com/cyrenei/containment/main/install.sh | sh
+       https://raw.githubusercontent.com/cyrenei/code-jail/main/install.sh | sh
 
    # Or install somewhere else
    $ CODEJAIL_INSTALL_DIR=/usr/local/bin curl -sSf \
-       https://raw.githubusercontent.com/cyrenei/containment/main/install.sh | sh
+       https://raw.githubusercontent.com/cyrenei/code-jail/main/install.sh | sh
 
 The script will offer to add ``~/.codejail/bin`` to your PATH if it is not there already.
 
@@ -32,7 +32,7 @@ If you have the Rust toolchain installed:
 
 .. code-block:: bash
 
-   $ git clone https://github.com/cyrenei/containment.git
+   $ git clone https://github.com/cyrenei/code-jail.git
    $ cd codejail
    $ cargo install --path .
 

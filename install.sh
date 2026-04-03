@@ -1,6 +1,6 @@
 #!/bin/sh
 # codejail installer - downloads a pre-built binary from GitHub Releases.
-# Usage: curl -sSf https://raw.githubusercontent.com/cyrenei/containment/main/install.sh | sh
+# Usage: curl -sSf https://raw.githubusercontent.com/cyrenei/code-jail/main/install.sh | sh
 #
 # Environment variables:
 #   CODEJAIL_VERSION      - version to install (default: latest)
@@ -8,7 +8,7 @@
 
 set -eu
 
-REPO="cyrenei/containment"
+REPO="cyrenei/code-jail"
 INSTALL_DIR="${CODEJAIL_INSTALL_DIR:-$HOME/.codejail/bin}"
 
 main() {
