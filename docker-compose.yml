@@ -1,7 +1,7 @@
 services:
-  containment:
+  codejail:
     build: .
-    image: containment:latest
+    image: codejail:latest
     volumes:
       # Mount a host workspace directory into the container
       - ./workspace:/data/workspace

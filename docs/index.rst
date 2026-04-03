@@ -1,20 +1,20 @@
-containment
-===========
+codejail
+========
 
-A WASM sandbox with policy-enforced access control. Run untrusted code with deny-by-default capabilities and arbiter policy enforcement on every grant.
+A WASM sandbox with policy-enforced access control. Run untrusted code with deny-by-default capabilities and policy enforcement on every grant.
 
-The sandbox is the cell. The `arbiter <../arbiter-mcp-firewall/>`_ is the guard. Together they form containment.
+The sandbox is the cell. The `policy engine <https://github.com/cyrenei/arbiter-mcp-firewall>`_ is the guard. Together they form codejail.
 
 .. code-block:: bash
 
-   # Run with arbiter policy enforcement (recommended)
-   $ containment run agent.wasm \
-       --arbiter policy.toml \
+   # Run with policy enforcement (recommended)
+   $ codejail run agent.wasm \
+       --policy policy.toml \
        --intent "read and analyze" \
        --cap fs:read:/home/you/project
 
-   # Simple mode — no policy, not recommended
-   $ containment run program.wasm
+   # Simple mode -- no policy, not recommended
+   $ codejail run program.wasm
 
 .. toctree::
    :maxdepth: 2
@@ -29,14 +29,14 @@ The sandbox is the cell. The `arbiter <../arbiter-mcp-firewall/>`_ is the guard.
 
    cli
    capabilities
-   containmentfile
+   jailfile
    resource-limits
 
 .. toctree::
    :maxdepth: 2
-   :caption: Arbiter policy enforcement
+   :caption: Policy enforcement
 
-   arbiter
+   policy
 
 .. toctree::
    :maxdepth: 2

@@ -13,6 +13,6 @@ Initial release.
 - CPU fuel limits and wall-clock timeouts
 - Container state tracking
 - Image store
-- Build from Containmentfile (Rust source to wasm32-wasip1)
+- Build from JailFile (Rust source to wasm32-wasip1)
 - Module inspection
 - Optional bubblewrap outer sandbox (``--bwrap``)

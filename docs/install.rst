@@ -4,7 +4,7 @@ Installation
 Quick install (recommended)
 ---------------------------
 
-The fastest way to get containment is the install script. It downloads a pre-built binary from GitHub Releases, verifies the SHA256 checksum, and puts it in ``~/.containment/bin/``.
+The fastest way to get codejail is the install script. It downloads a pre-built binary from GitHub Releases, verifies the SHA256 checksum, and puts it in ``~/.codejail/bin/``.
 
 .. code-block:: bash
 
@@ -16,14 +16,14 @@ To pin a specific version or change the install directory:
 
 .. code-block:: bash
 
-   $ CONTAINMENT_VERSION=v0.1.0 curl -sSf \
+   $ CODEJAIL_VERSION=v0.1.0 curl -sSf \
        https://raw.githubusercontent.com/cyrenei/containment/main/install.sh | sh
 
    # Or install somewhere else
-   $ CONTAINMENT_INSTALL_DIR=/usr/local/bin curl -sSf \
+   $ CODEJAIL_INSTALL_DIR=/usr/local/bin curl -sSf \
        https://raw.githubusercontent.com/cyrenei/containment/main/install.sh | sh
 
-The script will offer to add ``~/.containment/bin`` to your PATH if it is not there already.
+The script will offer to add ``~/.codejail/bin`` to your PATH if it is not there already.
 
 From source (cargo)
 -------------------
@@ -33,38 +33,38 @@ If you have the Rust toolchain installed:
 .. code-block:: bash
 
    $ git clone https://github.com/cyrenei/containment.git
-   $ cd containment
+   $ cd codejail
    $ cargo install --path .
 
-This puts the ``containment`` binary in ``~/.cargo/bin/``. Make sure that is in your PATH.
+This puts the ``codejail`` binary in ``~/.cargo/bin/``. Make sure that is in your PATH.
 
 Docker
 ------
 
-You can run containment in a Docker container without installing anything locally. The image includes bubblewrap and everything needed.
+You can run codejail in a Docker container without installing anything locally. The image includes bubblewrap and everything needed.
 
 .. code-block:: bash
 
-   $ docker build -t containment .
-   $ docker run --rm containment info
+   $ docker build -t codejail .
+   $ docker run --rm codejail info
 
 To run WASM modules from a host directory, mount it as a volume:
 
 .. code-block:: bash
 
-   $ docker run --rm -v ./workspace:/data/workspace containment run /data/workspace/program.wasm
+   $ docker run --rm -v ./workspace:/data/workspace codejail run /data/workspace/program.wasm
 
 For ``--bwrap`` support inside Docker, grant the ``SYS_ADMIN`` capability:
 
 .. code-block:: bash
 
    $ docker run --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
-       containment run --bwrap program.wasm
+       codejail run --bwrap program.wasm
 
 WASM compilation target
 -----------------------
 
-If you want to build Rust source files into WASM modules (using ``containment build``), you also need the wasm32-wasip1 compilation target:
+If you want to build Rust source files into WASM modules (using ``codejail build``), you also need the wasm32-wasip1 compilation target:
 
 .. code-block:: bash
 
@@ -95,6 +95,6 @@ Verify the install
 
 .. code-block:: bash
 
-   $ containment info
+   $ codejail info
 
 This shows your runtime version, available features, and whether the wasm32-wasip1 target is installed.

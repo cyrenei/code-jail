@@ -161,7 +161,7 @@ impl SandboxRuntime {
             let used = limits.fuel.unwrap_or(0).saturating_sub(remaining);
             if used > 0 {
                 eprintln!(
-                    "[containment] Fuel used: {} / {} ({:.1}%)",
+                    "[codejail] Fuel used: {} / {} ({:.1}%)",
                     used,
                     limits.fuel.unwrap_or(0),
                     (used as f64 / limits.fuel.unwrap_or(1) as f64) * 100.0
@@ -169,7 +169,7 @@ impl SandboxRuntime {
             }
         }
         eprintln!(
-            "[containment] Wall time: {:.2}s",
+            "[codejail] Wall time: {:.2}s",
             start.elapsed().as_secs_f64()
         );
 

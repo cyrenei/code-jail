@@ -1,7 +1,8 @@
 [package]
-name = "containment"
+name = "codejail"
 version = "0.1.0"
 edition = "2024"
+license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1"
@@ -16,13 +17,13 @@ wasmtime = "43"
 wasmtime-wasi = "43"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
-# Arbiter MCP Firewall integration (all path deps for version consistency)
-arbiter-mcp = { path = "arbiter-mcp-firewall/crates/arbiter-mcp" }
-arbiter-audit = { path = "arbiter-mcp-firewall/crates/arbiter-audit" }
-arbiter-policy = { path = "arbiter-mcp-firewall/crates/arbiter-policy" }
-arbiter-session = { path = "arbiter-mcp-firewall/crates/arbiter-session" }
-arbiter-identity = { path = "arbiter-mcp-firewall/crates/arbiter-identity" }
-arbiter-behavior = { path = "arbiter-mcp-firewall/crates/arbiter-behavior" }
+# Policy enforcement crates (from crates.io)
+arbiter-mcp = "0.0.28"
+arbiter-audit = "0.5"
+arbiter-policy = "0.0.28"
+arbiter-session = "0.0.28"
+arbiter-identity = "0.0.28"
+arbiter-behavior = "0.0.28"
 
 [dev-dependencies]
 assert_cmd = "2"

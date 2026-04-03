@@ -1,15 +1,15 @@
 #!/bin/sh
-# Containment installer - downloads a pre-built binary from GitHub Releases.
+# codejail installer - downloads a pre-built binary from GitHub Releases.
 # Usage: curl -sSf https://raw.githubusercontent.com/cyrenei/containment/main/install.sh | sh
 #
 # Environment variables:
-#   CONTAINMENT_VERSION      - version to install (default: latest)
-#   CONTAINMENT_INSTALL_DIR  - installation directory (default: ~/.containment/bin)
+#   CODEJAIL_VERSION      - version to install (default: latest)
+#   CODEJAIL_INSTALL_DIR  - installation directory (default: ~/.codejail/bin)
 
 set -eu
 
 REPO="cyrenei/containment"
-INSTALL_DIR="${CONTAINMENT_INSTALL_DIR:-$HOME/.containment/bin}"
+INSTALL_DIR="${CODEJAIL_INSTALL_DIR:-$HOME/.codejail/bin}"
 
 main() {
     need_cmd curl
@@ -25,16 +25,16 @@ main() {
     printf "Detected platform: %s\n" "$_target"
 
     _version="$(resolve_version)"
-    printf "Installing containment %s\n" "$_version"
+    printf "Installing codejail %s\n" "$_version"
 
-    _url="https://github.com/${REPO}/releases/download/${_version}/containment-${_target}.tar.gz"
+    _url="https://github.com/${REPO}/releases/download/${_version}/codejail-${_target}.tar.gz"
     _checksum_url="https://github.com/${REPO}/releases/download/${_version}/checksums-sha256.txt"
 
     _tmpdir="$(mktemp -d)"
     trap 'rm -rf "$_tmpdir"' EXIT
 
-    printf "Downloading containment-%s.tar.gz...\n" "$_target"
-    curl -sSfL "$_url" -o "$_tmpdir/containment.tar.gz" || {
+    printf "Downloading codejail-%s.tar.gz...\n" "$_target"
+    curl -sSfL "$_url" -o "$_tmpdir/codejail.tar.gz" || {
         err "download failed - check that release ${_version} exists at https://github.com/${REPO}/releases"
     }
 
@@ -44,28 +44,28 @@ main() {
     }
 
     printf "Verifying SHA256 checksum...\n"
-    verify_checksum "$_tmpdir" "containment-${_target}.tar.gz"
+    verify_checksum "$_tmpdir" "codejail-${_target}.tar.gz"
 
     printf "Extracting...\n"
-    tar xzf "$_tmpdir/containment.tar.gz" -C "$_tmpdir"
+    tar xzf "$_tmpdir/codejail.tar.gz" -C "$_tmpdir"
 
     # Find the binary inside the extracted archive
     local _bin=""
-    for _candidate in "$_tmpdir"/*/containment "$_tmpdir"/containment; do
+    for _candidate in "$_tmpdir"/*/codejail "$_tmpdir"/codejail; do
         if [ -f "$_candidate" ]; then
             _bin="$_candidate"
             break
         fi
     done
     if [ -z "$_bin" ]; then
-        err "could not find containment binary in archive"
+        err "could not find codejail binary in archive"
     fi
 
     mkdir -p "$INSTALL_DIR"
-    cp "$_bin" "$INSTALL_DIR/containment"
-    chmod +x "$INSTALL_DIR/containment"
+    cp "$_bin" "$INSTALL_DIR/codejail"
+    chmod +x "$INSTALL_DIR/codejail"
 
-    printf "\nContainment %s installed to %s/containment\n" "$_version" "$INSTALL_DIR"
+    printf "\ncodejail %s installed to %s/codejail\n" "$_version" "$INSTALL_DIR"
 
     if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
         local _line="export PATH=\"${INSTALL_DIR}:\$PATH\""
@@ -78,7 +78,7 @@ main() {
             read -r _answer </dev/tty
             case "$_answer" in
                 [yY]|[yY][eE][sS])
-                    printf '\n# Added by Containment installer\n%s\n' "$_line" >> "$_profile"
+                    printf '\n# Added by codejail installer\n%s\n' "$_line" >> "$_profile"
                     printf "Added to %s. Restart your shell or run:\n" "$_profile"
                     printf "  source %s\n" "$_profile"
                     ;;
@@ -88,13 +88,13 @@ main() {
                     ;;
             esac
         else
-            printf "\nAdd containment to your PATH for this session:\n"
+            printf "\nAdd codejail to your PATH for this session:\n"
             printf "  %s\n" "$_line"
             printf "\nTo persist across sessions, add that line to your shell profile (~/.bashrc, ~/.zshrc, etc.)\n"
         fi
     fi
 
-    printf "\nVerify: containment --version\n"
+    printf "\nVerify: codejail --version\n"
 }
 
 detect_os() {
@@ -118,18 +118,17 @@ detect_arch() {
 }
 
 resolve_version() {
-    if [ -n "${CONTAINMENT_VERSION:-}" ]; then
-        echo "$CONTAINMENT_VERSION"
+    if [ -n "${CODEJAIL_VERSION:-}" ]; then
+        echo "$CODEJAIL_VERSION"
         return
     fi
-    # Fetch latest release tag via GitHub API redirect
     local _location
     _location="$(curl -sSf -o /dev/null -w '%{redirect_url}' "https://github.com/${REPO}/releases/latest")" || {
-        err "could not determine latest version - set CONTAINMENT_VERSION explicitly or check https://github.com/${REPO}/releases"
+        err "could not determine latest version - set CODEJAIL_VERSION explicitly or check https://github.com/${REPO}/releases"
     }
     local _tag="${_location##*/}"
     if [ -z "$_tag" ]; then
-        err "could not determine latest version - no releases found. Set CONTAINMENT_VERSION explicitly."
+        err "could not determine latest version - no releases found. Set CODEJAIL_VERSION explicitly."
     fi
     echo "$_tag"
 }
@@ -144,9 +143,9 @@ verify_checksum() {
     fi
 
     if command -v sha256sum >/dev/null 2>&1; then
-        _actual="$(sha256sum "$_dir/containment.tar.gz" | awk '{print $1}')"
+        _actual="$(sha256sum "$_dir/codejail.tar.gz" | awk '{print $1}')"
     elif command -v shasum >/dev/null 2>&1; then
-        _actual="$(shasum -a 256 "$_dir/containment.tar.gz" | awk '{print $1}')"
+        _actual="$(shasum -a 256 "$_dir/codejail.tar.gz" | awk '{print $1}')"
     else
         err "no sha256sum or shasum found - cannot verify checksum"
     fi

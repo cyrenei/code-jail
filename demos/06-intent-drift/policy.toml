@@ -1,4 +1,4 @@
-# Arbiter policy: allow fs_write only when intent matches write/build/deploy.
+# Policy: allow fs_write only when intent matches write/build/deploy.
 # Deny everything else by default.
 
 [[policies]]

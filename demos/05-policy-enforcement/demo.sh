@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# -- Demo 05: Arbiter Policy ---------------------------------------------------
+# -- Demo 05: Policy Enforcement -----------------------------------------------
 # Scenario: Policy allows fs_write only when intent matches write/build/deploy.
 # Expected: "read and review" intent = DENIED, "build output" intent = ALLOWED.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="${SCRIPT_DIR}/../.."
-CONTAINMENT="${ROOT}/target/release/containment"
-if [ ! -x "$CONTAINMENT" ]; then
-  CONTAINMENT="${ROOT}/target/debug/containment"
+CODEJAIL="${ROOT}/target/release/codejail"
+if [ ! -x "$CODEJAIL" ]; then
+  CODEJAIL="${ROOT}/target/debug/codejail"
 fi
-if [ ! -x "$CONTAINMENT" ]; then
-  echo -e "\033[0;31mNo containment binary found. Run 'cargo build' first.\033[0m"
+if [ ! -x "$CODEJAIL" ]; then
+  echo -e "\033[0;31mNo codejail binary found. Run 'cargo build' first.\033[0m"
   exit 1
 fi
 
@@ -24,11 +24,11 @@ NC='\033[0m'
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
-export CONTAINMENT_HOME="$TMPDIR/state"
+export CODEJAIL_HOME="$TMPDIR/state"
 
 echo ""
 echo -e "${BOLD}════════════════════════════════════════════════════════════${NC}"
-echo -e "${BOLD}  DEMO 05: Arbiter Policy${NC}"
+echo -e "${BOLD}  DEMO 05: Policy Enforcement${NC}"
 echo -e "${BOLD}════════════════════════════════════════════════════════════${NC}"
 echo ""
 echo "  Policy: fs_write allowed only when intent matches write/build/deploy"
@@ -42,7 +42,7 @@ rustc --target wasm32-wasip1 --edition 2021 -o "$TMPDIR/program.wasm" "$SCRIPT_D
 echo -e "${GREEN}Compiled${NC}"
 echo ""
 
-POLICY="$SCRIPT_DIR/arbiter-policy.toml"
+POLICY="$SCRIPT_DIR/policy.toml"
 
 # -- Run 1: Wrong intent (DENIED) ---------------------------------------------
 echo -e "${BOLD}-- RUN 1: --intent \"read and review\" (mismatched) --${NC}"
@@ -51,8 +51,8 @@ echo ""
 WORKSPACE1="$TMPDIR/ws1"
 mkdir -p "$WORKSPACE1"
 
-OUTPUT=$("$CONTAINMENT" run \
-  --arbiter "$POLICY" \
+OUTPUT=$("$CODEJAIL" run \
+  --policy "$POLICY" \
   --intent "read and review" \
   -v "$WORKSPACE1:/workspace" \
   "$TMPDIR/program.wasm" 2>&1 || true)
@@ -64,7 +64,7 @@ echo "$OUTPUT" | while IFS= read -r line; do
       echo -e "  ${GREEN}$line${NC}" ;;
     *"failed"*|*"Failed"*)
       echo -e "  ${RED}$line${NC}" ;;
-    *"[containment]"*)
+    *"[codejail]"*)
       echo -e "  ${YELLOW}$line${NC}" ;;
     *)
       echo "  $line" ;;
@@ -80,8 +80,8 @@ echo ""
 WORKSPACE2="$TMPDIR/ws2"
 mkdir -p "$WORKSPACE2"
 
-OUTPUT=$("$CONTAINMENT" run \
-  --arbiter "$POLICY" \
+OUTPUT=$("$CODEJAIL" run \
+  --policy "$POLICY" \
   --intent "build output" \
   -v "$WORKSPACE2:/workspace" \
   "$TMPDIR/program.wasm" 2>&1)
@@ -91,7 +91,7 @@ echo "$OUTPUT" | while IFS= read -r line; do
       echo -e "  ${GREEN}$line${NC}" ;;
     *"[x]"*|*"denied"*)
       echo -e "  ${RED}$line${NC}" ;;
-    *"[containment]"*)
+    *"[codejail]"*)
       echo -e "  ${YELLOW}$line${NC}" ;;
     *)
       echo "  $line" ;;
@@ -101,15 +101,15 @@ done
 echo ""
 echo -e "${BOLD}-- Explanation --${NC}"
 echo ""
-echo "  The arbiter policy file defines rules that match capabilities"
-echo "  against the declared intent. The policy here allows fs_write"
-echo "  only when the intent contains 'write', 'build', or 'deploy'."
+echo "  The policy file defines rules that match capabilities against"
+echo "  the declared intent. The policy here allows fs_write only when"
+echo "  the intent contains 'write', 'build', or 'deploy'."
 echo ""
 echo "  With intent 'read and review', the fs_write capability for the"
 echo "  volume mount is denied by policy. The sandbox either runs with"
 echo "  no write access or refuses to start. With intent 'build output',"
 echo "  the regex matches and the write is authorized."
 echo ""
-echo "  This is how arbiter enforces least-privilege based on what the"
-echo "  agent says it wants to do."
+echo "  This is how the policy engine enforces least-privilege based on"
+echo "  what the agent says it wants to do."
 echo ""

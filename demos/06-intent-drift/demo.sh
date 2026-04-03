@@ -7,12 +7,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="${SCRIPT_DIR}/../.."
-CONTAINMENT="${ROOT}/target/release/containment"
-if [ ! -x "$CONTAINMENT" ]; then
-  CONTAINMENT="${ROOT}/target/debug/containment"
+CODEJAIL="${ROOT}/target/release/codejail"
+if [ ! -x "$CODEJAIL" ]; then
+  CODEJAIL="${ROOT}/target/debug/codejail"
 fi
-if [ ! -x "$CONTAINMENT" ]; then
-  echo -e "\033[0;31mNo containment binary found. Run 'cargo build' first.\033[0m"
+if [ ! -x "$CODEJAIL" ]; then
+  echo -e "\033[0;31mNo codejail binary found. Run 'cargo build' first.\033[0m"
   exit 1
 fi
 
@@ -24,7 +24,7 @@ NC='\033[0m'
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
-export CONTAINMENT_HOME="$TMPDIR/state"
+export CODEJAIL_HOME="$TMPDIR/state"
 
 echo ""
 echo -e "${BOLD}════════════════════════════════════════════════════════════${NC}"
@@ -41,7 +41,7 @@ rustc --target wasm32-wasip1 --edition 2021 -o "$TMPDIR/program.wasm" "$SCRIPT_D
 echo -e "${GREEN}Compiled${NC}"
 echo ""
 
-POLICY="$SCRIPT_DIR/arbiter-policy.toml"
+POLICY="$SCRIPT_DIR/policy.toml"
 WORKSPACE="$TMPDIR/workspace"
 mkdir -p "$WORKSPACE"
 
@@ -49,8 +49,8 @@ mkdir -p "$WORKSPACE"
 echo -e "${BOLD}-- RUN: --intent \"read and analyze\" with write volume mount --${NC}"
 echo ""
 
-OUTPUT=$("$CONTAINMENT" run \
-  --arbiter "$POLICY" \
+OUTPUT=$("$CODEJAIL" run \
+  --policy "$POLICY" \
   --intent "read and analyze" \
   -v "$WORKSPACE:/workspace" \
   "$TMPDIR/program.wasm" 2>&1 || true)
@@ -62,7 +62,7 @@ echo "$OUTPUT" | while IFS= read -r line; do
       echo -e "  ${RED}$line${NC}" ;;
     *"[+]"*|*"allowed"*)
       echo -e "  ${GREEN}$line${NC}" ;;
-    *"[containment]"*)
+    *"[codejail]"*)
       echo -e "  ${YELLOW}$line${NC}" ;;
     *"failed"*|*"Failed"*)
       echo -e "  ${RED}$line${NC}" ;;
@@ -74,13 +74,13 @@ done
 echo ""
 echo -e "${BOLD}-- Explanation --${NC}"
 echo ""
-echo "  The arbiter's behavioral anomaly detector compares what the"
+echo "  The policy engine's behavioral anomaly detector compares what the"
 echo "  agent declared it wants to do (the intent) with what it is"
 echo "  actually requesting (the capabilities). Here the intent says"
 echo "  'read and analyze' but a writable volume mount was requested."
 echo ""
 echo "  The drift detector flags this mismatch:"
-echo "    [containment] drift detected: fs_write (Write) vs intent 'read and analyze'"
+echo "    [codejail] drift detected: fs_write (Write) vs intent 'read and analyze'"
 echo ""
 echo "  This is not the same as policy denial. Drift detection is a"
 echo "  separate behavioral layer that watches for intent-action"

@@ -2,16 +2,16 @@ use std::path::Path;
 
 use clap::{Parser, Subcommand};
 
-mod arbiter;
 mod capability;
 mod container;
 mod image;
+mod policy;
 mod runtime;
 mod sandbox;
 
 #[derive(Parser)]
 #[command(
-    name = "containment",
+    name = "codejail",
     version,
     about = "WASM sandbox with Docker-like commands.\n\n\
              Run untrusted code with deny-by-default capabilities.\n\
@@ -42,9 +42,9 @@ enum Commands {
         #[arg(long)]
         name: Option<String>,
 
-        /// Containmentfile path for capability manifest
-        #[arg(short = 'f', long = "containmentfile")]
-        containmentfile: Option<String>,
+        /// JailFile path for capability manifest
+        #[arg(short = 'f', long = "jailfile")]
+        jailfile: Option<String>,
 
         /// CPU fuel limit (0 = unlimited)
         #[arg(long, default_value = "1000000000")]
@@ -70,15 +70,15 @@ enum Commands {
         #[arg(long)]
         bwrap: bool,
 
-        /// Arbiter policy file for capability authorization (enables arbiter mode)
+        /// Policy file for capability authorization (enables policy mode)
         #[arg(long)]
-        arbiter: Option<String>,
+        policy: Option<String>,
 
-        /// Declared intent for arbiter behavioral drift detection
+        /// Declared intent for behavioral drift detection
         #[arg(long, default_value = "general")]
         intent: String,
 
-        /// Arbiter audit log path
+        /// Audit log path
         #[arg(long)]
         audit_log: Option<String>,
 
@@ -132,14 +132,14 @@ enum Commands {
         image: String,
     },
 
-    /// Build from a Containmentfile.toml
+    /// Build from a JailFile.toml
     Build {
         /// Build context directory
         #[arg(default_value = ".")]
         context: String,
 
-        /// Containmentfile path (relative to context)
-        #[arg(short = 'f', long, default_value = "Containmentfile.toml")]
+        /// JailFile path (relative to context)
+        #[arg(short = 'f', long, default_value = "JailFile.toml")]
         file: String,
     },
 
@@ -155,14 +155,14 @@ fn main() -> anyhow::Result<()> {
             caps,
             detach,
             name,
-            containmentfile,
+            jailfile,
             fuel,
             timeout,
             net,
             volumes,
             env_vars,
             bwrap,
-            arbiter,
+            policy,
             intent,
             audit_log,
             args,
@@ -171,14 +171,14 @@ fn main() -> anyhow::Result<()> {
             caps,
             _detach: detach,
             name,
-            containmentfile,
+            jailfile,
             fuel,
             timeout,
             net,
             volumes,
             env_vars,
             bwrap,
-            arbiter,
+            policy,
             intent,
             audit_log,
             args,
@@ -201,14 +201,14 @@ struct RunArgs {
     caps: Vec<String>,
     _detach: bool,
     name: Option<String>,
-    containmentfile: Option<String>,
+    jailfile: Option<String>,
     fuel: u64,
     timeout: u64,
     net: bool,
     volumes: Vec<String>,
     env_vars: Vec<String>,
     bwrap: bool,
-    arbiter: Option<String>,
+    policy: Option<String>,
     intent: String,
     audit_log: Option<String>,
     args: Vec<String>,
@@ -225,11 +225,11 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
         grants.push(capability::CapGrant::parse(s)?);
     }
 
-    // Load base capabilities from Containmentfile or defaults
-    let base_caps = if let Some(cf_path) = &a.containmentfile {
-        let content = std::fs::read_to_string(cf_path)?;
-        let cf: capability::Containmentfile = toml::from_str(&content)?;
-        cf.capabilities
+    // Load base capabilities from JailFile or defaults
+    let base_caps = if let Some(jf_path) = &a.jailfile {
+        let content = std::fs::read_to_string(jf_path)?;
+        let jf: capability::JailFile = toml::from_str(&content)?;
+        jf.capabilities
     } else {
         capability::Capabilities {
             stdin: true,
@@ -239,14 +239,14 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
         }
     };
 
-    // Determine arbiter policy path (flag > env > none)
-    let arbiter_policy = a.arbiter.or_else(|| std::env::var("ARBITER_POLICY").ok());
+    // Determine policy path (flag > env > none)
+    let policy_path_opt = a.policy.or_else(|| std::env::var("POLICY_FILE").ok());
 
-    // Resolve capabilities: either through arbiter policy or self-authorization
-    let resolved = if let Some(policy_path) = &arbiter_policy {
-        // Arbiter mode: evaluate each capability against policy
-        eprintln!("[containment] arbiter mode: policy {policy_path}");
-        let gate = arbiter::ArbiterGate::load(
+    // Resolve capabilities: either through policy evaluation or self-authorization
+    let resolved = if let Some(policy_path) = &policy_path_opt {
+        // Policy mode: evaluate each capability against policy
+        eprintln!("[codejail] policy mode: {policy_path}");
+        let gate = policy::PolicyGate::load(
             Path::new(policy_path),
             a.audit_log.as_deref().map(Path::new),
         )?;
@@ -267,20 +267,20 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
             a.timeout,
         ))?;
 
-        // Print arbiter decisions
+        // Print policy decisions
         for d in &verdict.decisions {
             let icon = if d.allowed { "+" } else { "x" };
-            eprintln!("[containment]   [{icon}] {}: {}", d.tool_name, d.reason);
+            eprintln!("[codejail]   [{icon}] {}: {}", d.tool_name, d.reason);
         }
         if verdict.denied_count > 0 {
             eprintln!(
-                "[containment] arbiter denied {} of {} capability requests",
+                "[codejail] policy denied {} of {} capability requests",
                 verdict.denied_count,
                 verdict.decisions.len()
             );
         }
         eprintln!(
-            "[containment] session {} (agent {}, intent: '{}')",
+            "[codejail] session {} (agent {}, intent: '{}')",
             verdict.session.session_id, verdict.agent.id, a.intent
         );
 
@@ -313,13 +313,13 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
     println!("{}", ctr.short_id);
 
     // Print capability summary
-    eprintln!("[containment] Sandbox: {}", container_name);
-    eprintln!("[containment] Image:   {}", wasm_path.display());
+    eprintln!("[codejail] Sandbox: {}", container_name);
+    eprintln!("[codejail] Image:   {}", wasm_path.display());
     if !resolved.fs_mounts.is_empty() {
         for m in &resolved.fs_mounts {
             let mode = if m.writable { "rw" } else { "ro" };
             eprintln!(
-                "[containment]   fs: {} -> {} ({})",
+                "[codejail]   fs: {} -> {} ({})",
                 m.host.display(),
                 m.guest,
                 mode
@@ -327,10 +327,10 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
         }
     }
     if !resolved.net_rules.is_empty() {
-        eprintln!("[containment]   net: {:?}", resolved.net_rules);
+        eprintln!("[codejail]   net: {:?}", resolved.net_rules);
     }
     if resolved.fs_mounts.is_empty() && resolved.net_rules.is_empty() {
-        eprintln!("[containment]   (no capabilities granted, fully isolated)");
+        eprintln!("[codejail]   (no capabilities granted, fully isolated)");
     }
     eprintln!();
 
@@ -372,7 +372,7 @@ fn cmd_ps(all: bool) -> anyhow::Result<()> {
         );
     }
     if containers.is_empty() {
-        eprintln!("No containers found. Run one with: containment run <image.wasm>");
+        eprintln!("No containers found. Run one with: codejail run <image.wasm>");
     }
     Ok(())
 }
@@ -427,7 +427,7 @@ fn cmd_images() -> anyhow::Result<()> {
         );
     }
     if images.is_empty() {
-        eprintln!("No images. Import one with: containment import <name> <path.wasm>");
+        eprintln!("No images. Import one with: codejail import <name> <path.wasm>");
     }
     Ok(())
 }
@@ -468,24 +468,24 @@ fn cmd_inspect(image: &str) -> anyhow::Result<()> {
 }
 
 fn cmd_build(context: &str, file: &str) -> anyhow::Result<()> {
-    let containmentfile_path = Path::new(context).join(file);
+    let jailfile_path = Path::new(context).join(file);
     anyhow::ensure!(
-        containmentfile_path.exists(),
-        "Containmentfile not found: {}",
-        containmentfile_path.display()
+        jailfile_path.exists(),
+        "JailFile not found: {}",
+        jailfile_path.display()
     );
 
-    let content = std::fs::read_to_string(&containmentfile_path)?;
-    let cf: capability::Containmentfile = toml::from_str(&content)?;
+    let content = std::fs::read_to_string(&jailfile_path)?;
+    let jf: capability::JailFile = toml::from_str(&content)?;
 
-    let entrypoint = Path::new(context).join(&cf.sandbox.entrypoint);
+    let entrypoint = Path::new(context).join(&jf.sandbox.entrypoint);
     anyhow::ensure!(
         entrypoint.exists(),
         "Entrypoint not found: {}",
         entrypoint.display()
     );
 
-    let image_name = cf.sandbox.name.unwrap_or_else(|| {
+    let image_name = jf.sandbox.name.unwrap_or_else(|| {
         entrypoint
             .file_stem()
             .unwrap_or_default()
@@ -496,7 +496,7 @@ fn cmd_build(context: &str, file: &str) -> anyhow::Result<()> {
     // If it's a Rust source file, compile to WASM
     if entrypoint.extension().is_some_and(|e| e == "rs") {
         println!(
-            "[containment] Compiling {} -> wasm32-wasip1...",
+            "[codejail] Compiling {} -> wasm32-wasip1...",
             entrypoint.display()
         );
         let wasm_out = entrypoint.with_extension("wasm");
@@ -510,12 +510,12 @@ fn cmd_build(context: &str, file: &str) -> anyhow::Result<()> {
             let stderr = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!("Compilation failed:\n{stderr}");
         }
-        println!("[containment] Compiled: {}", wasm_out.display());
+        println!("[codejail] Compiled: {}", wasm_out.display());
 
         let store = image::ImageStore::new()?;
         let img = store.import(&image_name, &wasm_out)?;
         println!(
-            "[containment] Image '{}' ready ({})",
+            "[codejail] Image '{}' ready ({})",
             img.name,
             human_size(img.size)
         );
@@ -523,14 +523,14 @@ fn cmd_build(context: &str, file: &str) -> anyhow::Result<()> {
         let store = image::ImageStore::new()?;
         let img = store.import(&image_name, &entrypoint)?;
         println!(
-            "[containment] Image '{}' ready ({})",
+            "[codejail] Image '{}' ready ({})",
             img.name,
             human_size(img.size)
         );
     } else {
         anyhow::bail!(
             "Don't know how to build '{}'. Supported: .rs, .wasm",
-            cf.sandbox.entrypoint
+            jf.sandbox.entrypoint
         );
     }
 
@@ -538,11 +538,11 @@ fn cmd_build(context: &str, file: &str) -> anyhow::Result<()> {
 }
 
 fn cmd_info() -> anyhow::Result<()> {
-    println!("containment {}", env!("CARGO_PKG_VERSION"));
+    println!("codejail {}", env!("CARGO_PKG_VERSION"));
     println!();
     println!("Runtime:     wasmtime 43");
     println!("WASI:        preview 1 (wasm32-wasip1)");
-    println!("Data dir:    {}", container::containment_home().display());
+    println!("Data dir:    {}", container::codejail_home().display());
     println!(
         "Bubblewrap:  {}",
         if sandbox::bwrap_available() {

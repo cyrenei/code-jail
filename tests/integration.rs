@@ -41,13 +41,13 @@ fn compile_fixtures() {
     });
 }
 
-fn containment_cmd() -> assert_cmd::Command {
+fn codejail_cmd() -> assert_cmd::Command {
     compile_fixtures();
-    let mut cmd = assert_cmd::Command::cargo_bin("containment").unwrap();
+    let mut cmd = assert_cmd::Command::cargo_bin("codejail").unwrap();
     // Use isolated state directory for tests
-    let test_home = std::env::temp_dir().join("containment-integration-test");
+    let test_home = std::env::temp_dir().join("codejail-integration-test");
     std::fs::create_dir_all(&test_home).unwrap();
-    cmd.env("CONTAINMENT_HOME", &test_home);
+    cmd.env("CODEJAIL_HOME", &test_home);
     cmd
 }
 
@@ -62,7 +62,7 @@ fn fixture(name: &str) -> String {
 
 #[test]
 fn test_hello_world() {
-    containment_cmd()
+    codejail_cmd()
         .args(["run", &fixture("hello")])
         .assert()
         .success()
@@ -71,7 +71,7 @@ fn test_hello_world() {
 
 #[test]
 fn test_info() {
-    containment_cmd()
+    codejail_cmd()
         .args(["info"])
         .assert()
         .success()
@@ -83,7 +83,7 @@ fn test_info() {
 
 #[test]
 fn test_escape_blocked() {
-    containment_cmd()
+    codejail_cmd()
         .args(["run", &fixture("escape_attempt")])
         .assert()
         .success()
@@ -94,7 +94,7 @@ fn test_escape_blocked() {
 #[test]
 fn test_no_env_by_default() {
     // env_test expects SANDBOX_TEST to be set; without it, it exits 1
-    containment_cmd()
+    codejail_cmd()
         .args(["run", &fixture("env_test")])
         .assert()
         .failure()
@@ -103,7 +103,7 @@ fn test_no_env_by_default() {
 
 #[test]
 fn test_env_granted() {
-    containment_cmd()
+    codejail_cmd()
         .env("SANDBOX_TEST", "hello")
         .args(["run", &fixture("env_test"), "-e", "SANDBOX_TEST"])
         .assert()
@@ -113,7 +113,7 @@ fn test_env_granted() {
 
 #[test]
 fn test_env_set_value() {
-    containment_cmd()
+    codejail_cmd()
         .args(["run", &fixture("env_test"), "-e", "SANDBOX_TEST=from_flag"])
         .assert()
         .success()
@@ -124,7 +124,7 @@ fn test_env_set_value() {
 
 #[test]
 fn test_args_passed() {
-    containment_cmd()
+    codejail_cmd()
         .args(["run", &fixture("args_test"), "--", "hello", "world"])
         .assert()
         .success()
@@ -133,7 +133,7 @@ fn test_args_passed() {
 
 #[test]
 fn test_args_missing_fails() {
-    containment_cmd()
+    codejail_cmd()
         .args(["run", &fixture("args_test")])
         .assert()
         .failure();
@@ -143,7 +143,7 @@ fn test_args_missing_fails() {
 
 #[test]
 fn test_fs_read_denied_without_grant() {
-    containment_cmd()
+    codejail_cmd()
         .args(["run", &fixture("fs_read")])
         .assert()
         .failure()
@@ -153,7 +153,7 @@ fn test_fs_read_denied_without_grant() {
 #[test]
 fn test_fs_read_granted() {
     let fixtures = fixtures_dir();
-    containment_cmd()
+    codejail_cmd()
         .args([
             "run",
             &fixture("fs_read"),
@@ -169,7 +169,7 @@ fn test_fs_read_granted() {
 #[test]
 fn test_fs_write() {
     let tmp = TempDir::new().unwrap();
-    containment_cmd()
+    codejail_cmd()
         .args([
             "run",
             &fixture("fs_write"),
@@ -191,7 +191,7 @@ fn test_fs_write() {
 
 #[test]
 fn test_fuel_limit_enforced() {
-    containment_cmd()
+    codejail_cmd()
         .args(["run", &fixture("fuel_burn"), "--fuel", "100000"])
         .assert()
         .failure()
@@ -200,7 +200,7 @@ fn test_fuel_limit_enforced() {
 
 #[test]
 fn test_fuel_sufficient() {
-    containment_cmd()
+    codejail_cmd()
         .args(["run", &fixture("hello"), "--fuel", "1000000000"])
         .assert()
         .success();
@@ -214,32 +214,32 @@ fn test_import_and_run_by_name() {
     compile_fixtures();
 
     // Import
-    let mut cmd = assert_cmd::Command::cargo_bin("containment").unwrap();
-    cmd.env("CONTAINMENT_HOME", test_home.path())
+    let mut cmd = assert_cmd::Command::cargo_bin("codejail").unwrap();
+    cmd.env("CODEJAIL_HOME", test_home.path())
         .args(["import", "test-hello", &fixture("hello")])
         .assert()
         .success()
         .stdout(predicate::str::contains("Imported: test-hello"));
 
     // List
-    let mut cmd = assert_cmd::Command::cargo_bin("containment").unwrap();
-    cmd.env("CONTAINMENT_HOME", test_home.path())
+    let mut cmd = assert_cmd::Command::cargo_bin("codejail").unwrap();
+    cmd.env("CODEJAIL_HOME", test_home.path())
         .args(["images"])
         .assert()
         .success()
         .stdout(predicate::str::contains("test-hello"));
 
     // Run by name
-    let mut cmd = assert_cmd::Command::cargo_bin("containment").unwrap();
-    cmd.env("CONTAINMENT_HOME", test_home.path())
+    let mut cmd = assert_cmd::Command::cargo_bin("codejail").unwrap();
+    cmd.env("CODEJAIL_HOME", test_home.path())
         .args(["run", "test-hello"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Hello from WASM sandbox!"));
 
     // Remove
-    let mut cmd = assert_cmd::Command::cargo_bin("containment").unwrap();
-    cmd.env("CONTAINMENT_HOME", test_home.path())
+    let mut cmd = assert_cmd::Command::cargo_bin("codejail").unwrap();
+    cmd.env("CODEJAIL_HOME", test_home.path())
         .args(["rmi", "test-hello"])
         .assert()
         .success();
@@ -253,23 +253,23 @@ fn test_ps_and_prune() {
     compile_fixtures();
 
     // Run a container
-    let mut cmd = assert_cmd::Command::cargo_bin("containment").unwrap();
-    cmd.env("CONTAINMENT_HOME", test_home.path())
+    let mut cmd = assert_cmd::Command::cargo_bin("codejail").unwrap();
+    cmd.env("CODEJAIL_HOME", test_home.path())
         .args(["run", &fixture("hello")])
         .assert()
         .success();
 
     // List (shows with -a)
-    let mut cmd = assert_cmd::Command::cargo_bin("containment").unwrap();
-    cmd.env("CONTAINMENT_HOME", test_home.path())
+    let mut cmd = assert_cmd::Command::cargo_bin("codejail").unwrap();
+    cmd.env("CODEJAIL_HOME", test_home.path())
         .args(["ps", "-a"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Exited (0)"));
 
     // Prune
-    let mut cmd = assert_cmd::Command::cargo_bin("containment").unwrap();
-    cmd.env("CONTAINMENT_HOME", test_home.path())
+    let mut cmd = assert_cmd::Command::cargo_bin("codejail").unwrap();
+    cmd.env("CODEJAIL_HOME", test_home.path())
         .args(["prune"])
         .assert()
         .success()
@@ -280,7 +280,7 @@ fn test_ps_and_prune() {
 
 #[test]
 fn test_inspect_module() {
-    containment_cmd()
+    codejail_cmd()
         .args(["inspect", &fixture("hello")])
         .assert()
         .success()
@@ -295,14 +295,14 @@ fn test_named_container() {
     let test_home = TempDir::new().unwrap();
     compile_fixtures();
 
-    let mut cmd = assert_cmd::Command::cargo_bin("containment").unwrap();
-    cmd.env("CONTAINMENT_HOME", test_home.path())
+    let mut cmd = assert_cmd::Command::cargo_bin("codejail").unwrap();
+    cmd.env("CODEJAIL_HOME", test_home.path())
         .args(["run", &fixture("hello"), "--name", "my-sandbox"])
         .assert()
         .success();
 
-    let mut cmd = assert_cmd::Command::cargo_bin("containment").unwrap();
-    cmd.env("CONTAINMENT_HOME", test_home.path())
+    let mut cmd = assert_cmd::Command::cargo_bin("codejail").unwrap();
+    cmd.env("CODEJAIL_HOME", test_home.path())
         .args(["ps", "-a"])
         .assert()
         .success()
@@ -313,7 +313,7 @@ fn test_named_container() {
 
 #[test]
 fn test_missing_image() {
-    containment_cmd()
+    codejail_cmd()
         .args(["run", "nonexistent.wasm"])
         .assert()
         .failure()
@@ -322,7 +322,7 @@ fn test_missing_image() {
 
 #[test]
 fn test_invalid_cap() {
-    containment_cmd()
+    codejail_cmd()
         .args(["run", &fixture("hello"), "--cap", "invalid:stuff"])
         .assert()
         .failure()

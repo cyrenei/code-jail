@@ -1,14 +1,14 @@
 CLI reference
 =============
 
-containment run
----------------
+codejail run
+------------
 
 Run a WASM module in a capability-restricted sandbox.
 
 .. code-block:: text
 
-   containment run [OPTIONS] <IMAGE> [-- <ARGS>...]
+   codejail run [OPTIONS] <IMAGE> [-- <ARGS>...]
 
 **Arguments:**
 
@@ -31,14 +31,20 @@ Run a WASM module in a capability-restricted sandbox.
      - Set an environment variable. If only KEY is given, inherits from host.
    * - ``--net``
      - Allow all network access.
-   * - ``-f, --containmentfile <PATH>``
-     - Load capabilities from a Containmentfile. See :doc:`containmentfile`.
+   * - ``-f, --jailfile <PATH>``
+     - Load capabilities from a JailFile. See :doc:`jailfile`.
    * - ``--name <NAME>``
      - Set the container name (default: auto-generated).
    * - ``--fuel <N>``
      - CPU fuel limit (default: 1000000000). Set to 0 for unlimited.
    * - ``--timeout <SECS>``
      - Wall-clock timeout in seconds (default: 300).
+   * - ``--policy <PATH>``
+     - Policy file for capability authorization (enables policy mode).
+   * - ``--intent <DESC>``
+     - Declared intent for drift detection (default: general).
+   * - ``--audit-log <PATH>``
+     - Write policy decisions to a structured JSONL audit log.
    * - ``--bwrap``
      - Enable bubblewrap outer sandbox.
    * - ``-d, --detach``
@@ -49,115 +55,118 @@ Run a WASM module in a capability-restricted sandbox.
 .. code-block:: bash
 
    # Minimal: just stdout/stderr
-   $ containment run hello.wasm
+   $ codejail run hello.wasm
 
    # With filesystem and network
-   $ containment run agent.wasm \
+   $ codejail run agent.wasm \
        --cap fs:read:/project \
        --cap net:api.openai.com:443 \
        -v /tmp/out:/output \
        -e API_KEY
 
-   # With a Containmentfile
-   $ containment run agent.wasm -f Containmentfile.toml
+   # With a JailFile
+   $ codejail run agent.wasm -f JailFile.toml
 
-containment build
------------------
+   # With policy enforcement
+   $ codejail run agent.wasm --policy policy.toml --intent "read and analyze"
 
-Build an image from a Containmentfile.
+codejail build
+--------------
+
+Build an image from a JailFile.
 
 .. code-block:: text
 
-   containment build [DIR] [-f FILE]
+   codejail build [DIR] [-f FILE]
 
-Reads the Containmentfile, compiles the entrypoint (if it is a ``.rs`` file), and imports the result as a named image.
+Reads the JailFile, compiles the entrypoint (if it is a ``.rs`` file), and imports the result as a named image.
 
 **Options:**
 
 - ``DIR`` - Build context directory (default: ``.``)
-- ``-f, --file <FILE>`` - Containmentfile name (default: ``Containmentfile.toml``)
+- ``-f, --file <FILE>`` - JailFile name (default: ``JailFile.toml``)
 
-containment ps
---------------
+codejail ps
+-----------
 
 List containers.
 
 .. code-block:: text
 
-   containment ps [-a]
+   codejail ps [-a]
 
 By default, only shows running containers. Pass ``-a`` to include stopped and failed ones.
 
-containment stop
-----------------
+codejail stop
+-------------
 
 Stop a running container by sending SIGTERM.
 
 .. code-block:: text
 
-   containment stop <ID>
+   codejail stop <ID>
 
 Accepts a full container ID, short ID, or container name.
 
-containment rm
---------------
+codejail rm
+-----------
 
 Remove a stopped container record.
 
 .. code-block:: text
 
-   containment rm <ID>
+   codejail rm <ID>
 
-containment prune
------------------
+codejail prune
+--------------
 
 Remove all stopped and failed container records.
 
 .. code-block:: text
 
-   containment prune
+   codejail prune
 
-containment images
-------------------
+codejail images
+---------------
 
-List images in the local store (``~/.containment/images/``).
+List images in the local store (``~/.codejail/images/``).
 
 .. code-block:: text
 
-   containment images
+   codejail images
 
-containment import
-------------------
+codejail import
+---------------
 
 Import a ``.wasm`` file as a named image.
 
 .. code-block:: text
 
-   containment import <NAME> <PATH>
+   codejail import <NAME> <PATH>
 
-containment rmi
----------------
+codejail rmi
+------------
 
 Remove an image from the local store.
 
 .. code-block:: text
 
-   containment rmi <NAME>
+   codejail rmi <NAME>
 
-containment inspect
--------------------
+codejail inspect
+----------------
 
 Show metadata about a WASM module: file size, exports, and WASI imports.
 
 .. code-block:: text
 
-   containment inspect <IMAGE>
+   codejail inspect <IMAGE>
 
-containment info
-----------------
+codejail info
+-------------
 
 Show system information: wasmtime version, data directory, available features.
 
 .. code-block:: text
 
-   containment info
+   codejail info

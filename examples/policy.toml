@@ -1,4 +1,4 @@
-# Example arbiter policy for containment sandbox authorization.
+# Example policy for codejail sandbox authorization.
 #
 # This policy allows filesystem read access for any agent, but restricts
 # write and network access based on declared intent.

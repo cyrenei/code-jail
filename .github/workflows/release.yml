@@ -31,8 +31,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -53,27 +51,27 @@ jobs:
 
       - name: Strip binary (Linux)
         if: contains(matrix.target, 'linux') && !matrix.cross
-        run: strip target/${{ matrix.rust_target }}/release/containment
+        run: strip target/${{ matrix.rust_target }}/release/codejail
 
       - name: Strip binary (Linux ARM64 cross)
         if: matrix.cross
-        run: aarch64-linux-gnu-strip target/${{ matrix.rust_target }}/release/containment
+        run: aarch64-linux-gnu-strip target/${{ matrix.rust_target }}/release/codejail
 
       - name: Strip binary (macOS)
         if: contains(matrix.target, 'macos')
-        run: strip target/${{ matrix.rust_target }}/release/containment
+        run: strip target/${{ matrix.rust_target }}/release/codejail
 
       - name: Package
         run: |
-          mkdir -p dist/containment-${{ matrix.target }}
-          cp target/${{ matrix.rust_target }}/release/containment dist/containment-${{ matrix.target }}/
-          cp LICENSE README.md dist/containment-${{ matrix.target }}/
-          cd dist && tar czf containment-${{ matrix.target }}.tar.gz containment-${{ matrix.target }}
+          mkdir -p dist/codejail-${{ matrix.target }}
+          cp target/${{ matrix.rust_target }}/release/codejail dist/codejail-${{ matrix.target }}/
+          cp LICENSE README.md dist/codejail-${{ matrix.target }}/
+          cd dist && tar czf codejail-${{ matrix.target }}.tar.gz codejail-${{ matrix.target }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: containment-${{ matrix.target }}
-          path: dist/containment-${{ matrix.target }}.tar.gz
+          name: codejail-${{ matrix.target }}
+          path: dist/codejail-${{ matrix.target }}.tar.gz
 
   release:
     name: Create Release
@@ -88,7 +86,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
-          sha256sum containment-*.tar.gz > checksums-sha256.txt
+          sha256sum codejail-*.tar.gz > checksums-sha256.txt
           cat checksums-sha256.txt
 
       - name: Create GitHub Release
@@ -96,5 +94,5 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            artifacts/containment-*.tar.gz
+            artifacts/codejail-*.tar.gz
             artifacts/checksums-sha256.txt

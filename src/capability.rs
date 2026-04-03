@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// Containmentfile — capability manifest for a sandbox (like Dockerfile)
+/// JailFile — capability manifest for a sandbox (like Dockerfile)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Containmentfile {
+pub struct JailFile {
     pub sandbox: SandboxMeta,
     #[serde(default)]
     pub capabilities: Capabilities,
@@ -20,19 +20,14 @@ pub struct SandboxMeta {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Capabilities {
-    /// Directories with read-only access
     #[serde(default)]
     pub fs_read: Vec<String>,
-    /// Directories with read+write access
     #[serde(default)]
     pub fs_write: Vec<String>,
-    /// Allowed network destinations (e.g. "github.com:443", "*")
     #[serde(default)]
     pub net_allow: Vec<String>,
-    /// Allowed environment variables
     #[serde(default)]
     pub env: Vec<String>,
-    /// Inherit all environment variables from host
     #[serde(default)]
     pub inherit_env: bool,
     #[serde(default = "default_true")]
@@ -49,11 +44,8 @@ fn default_true() -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Limits {
-    /// Memory limit in MB
     pub memory_mb: Option<u64>,
-    /// CPU fuel limit (wasmtime fuel units)
     pub fuel: Option<u64>,
-    /// Wall-clock time limit in seconds
     pub wall_time_secs: Option<u64>,
 }
 
@@ -67,7 +59,6 @@ impl Default for Limits {
     }
 }
 
-/// A filesystem mount mapping host path -> guest path
 #[derive(Debug, Clone)]
 pub struct FsMount {
     pub host: PathBuf,
@@ -75,7 +66,6 @@ pub struct FsMount {
     pub writable: bool,
 }
 
-/// Parsed capability grant from CLI --cap flag
 #[derive(Debug, Clone)]
 pub enum CapGrant {
     Fs(FsMount),
@@ -84,7 +74,6 @@ pub enum CapGrant {
 }
 
 impl CapGrant {
-    /// Parse a capability string like "fs:read:/path", "net:host:port", "env:VAR1,VAR2"
     pub fn parse(s: &str) -> anyhow::Result<Self> {
         if let Some(rest) = s.strip_prefix("fs:read:") {
             Ok(CapGrant::Fs(FsMount {
@@ -99,7 +88,6 @@ impl CapGrant {
                 writable: true,
             }))
         } else if let Some(rest) = s.strip_prefix("fs:") {
-            // Default: read+write
             Ok(CapGrant::Fs(FsMount {
                 host: PathBuf::from(rest),
                 guest: rest.to_string(),
@@ -118,7 +106,6 @@ impl CapGrant {
     }
 }
 
-/// Build the complete capability set from Containmentfile + CLI overrides
 pub struct ResolvedCaps {
     pub fs_mounts: Vec<FsMount>,
     pub net_rules: Vec<String>,
@@ -138,7 +125,6 @@ impl ResolvedCaps {
         let mut net_rules: Vec<String> = base.net_allow.clone();
         let mut env_vars: Vec<(String, String)> = Vec::new();
 
-        // From Containmentfile
         for path in &base.fs_read {
             fs_mounts.push(FsMount {
                 host: PathBuf::from(path),
@@ -154,7 +140,6 @@ impl ResolvedCaps {
             });
         }
 
-        // Resolve Containmentfile env vars from host
         if base.inherit_env {
             for (k, v) in std::env::vars() {
                 env_vars.push((k, v));
@@ -167,7 +152,6 @@ impl ResolvedCaps {
             }
         }
 
-        // From --cap flags
         for grant in grants {
             match grant {
                 CapGrant::Fs(mount) => fs_mounts.push(mount.clone()),
@@ -182,7 +166,6 @@ impl ResolvedCaps {
             }
         }
 
-        // From -v volume mounts
         for v in volumes {
             let (host, guest) = if let Some((h, g)) = v.split_once(':') {
                 (h.to_string(), g.to_string())
@@ -196,7 +179,6 @@ impl ResolvedCaps {
             });
         }
 
-        // From -e env vars
         for e in env_overrides {
             if let Some((k, v)) = e.split_once('=') {
                 env_vars.push((k.to_string(), v.to_string()));
@@ -205,7 +187,6 @@ impl ResolvedCaps {
             }
         }
 
-        // From --net flag
         if net_flag {
             net_rules.push("*".to_string());
         }

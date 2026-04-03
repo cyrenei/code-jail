@@ -7,12 +7,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="${SCRIPT_DIR}/../.."
-CONTAINMENT="${ROOT}/target/release/containment"
-if [ ! -x "$CONTAINMENT" ]; then
-  CONTAINMENT="${ROOT}/target/debug/containment"
+CODEJAIL="${ROOT}/target/release/codejail"
+if [ ! -x "$CODEJAIL" ]; then
+  CODEJAIL="${ROOT}/target/debug/codejail"
 fi
-if [ ! -x "$CONTAINMENT" ]; then
-  echo -e "\033[0;31mNo containment binary found. Run 'cargo build' first.\033[0m"
+if [ ! -x "$CODEJAIL" ]; then
+  echo -e "\033[0;31mNo codejail binary found. Run 'cargo build' first.\033[0m"
   exit 1
 fi
 
@@ -24,7 +24,7 @@ NC='\033[0m'
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
-export CONTAINMENT_HOME="$TMPDIR/state"
+export CODEJAIL_HOME="$TMPDIR/state"
 
 echo ""
 echo -e "${BOLD}════════════════════════════════════════════════════════════${NC}"
@@ -42,15 +42,15 @@ rustc --target wasm32-wasip1 --edition 2021 -o "$TMPDIR/program.wasm" "$SCRIPT_D
 echo -e "${GREEN}Compiled${NC}"
 echo ""
 
-POLICY="$SCRIPT_DIR/arbiter-policy.toml"
+POLICY="$SCRIPT_DIR/policy.toml"
 AUDIT_LOG="$TMPDIR/audit.jsonl"
 
 # -- Run -----------------------------------------------------------------------
 echo -e "${BOLD}-- RUN: Mixed capabilities with --audit-log --${NC}"
 echo ""
 
-OUTPUT=$("$CONTAINMENT" run \
-  --arbiter "$POLICY" \
+OUTPUT=$("$CODEJAIL" run \
+  --policy "$POLICY" \
   --audit-log "$AUDIT_LOG" \
   --intent "read system info" \
   --cap "fs:read:/tmp" \
@@ -59,13 +59,13 @@ OUTPUT=$("$CONTAINMENT" run \
   "$TMPDIR/program.wasm" 2>&1 || true)
 echo "$OUTPUT" | while IFS= read -r line; do
   case "$line" in
-    *"[x]"*|*"arbiter denied"*)
+    *"[x]"*|*"denied"*)
       echo -e "  ${RED}$line${NC}" ;;
     *"[+]"*|*"allowed by"*)
       echo -e "  ${GREEN}$line${NC}" ;;
     *"drift detected"*)
       echo -e "  ${YELLOW}$line${NC}" ;;
-    *"[containment]"*)
+    *"[codejail]"*)
       echo -e "  ${YELLOW}$line${NC}" ;;
     *)
       echo "  $line" ;;

@@ -1,25 +1,25 @@
 Security model
 ==============
 
-Containment exists to run untrusted code safely. This page describes the three layers of defense, what they protect against, what they do not, and how they work together.
+Codejail exists to run untrusted code safely. This page describes the three layers of defense, what they protect against, what they do not, and how they work together.
 
 Threat model
 ------------
 
-Containment is designed for this scenario: you have a program you do not fully trust, and you want to run it without giving it access to your system. Examples:
+Codejail is designed for this scenario: you have a program you do not fully trust, and you want to run it without giving it access to your system. Examples:
 
 - An AI coding agent that might read your SSH keys
 - A build script from an unfamiliar project
 - A tool you downloaded that you have not audited
 
-The sandbox prevents the program from accessing anything you did not explicitly grant. The arbiter ensures that even explicit grants are evaluated against policy before taking effect.
+The sandbox prevents the program from accessing anything you did not explicitly grant. The policy engine ensures that even explicit grants are evaluated against rules before taking effect.
 
 Three layers of defense
 -----------------------
 
 **Layer 1: WASM capability isolation (always on).** The cell. Programs run as WebAssembly modules inside wasmtime with no ambient authority. They cannot access any resource the host did not explicitly provide.
 
-**Layer 2: Arbiter policy enforcement (recommended).** The guard. Every capability grant is evaluated against a deny-by-default policy before the sandbox starts. The policy engine checks agent identity, intent, tool name, and parameter constraints. Drift detection flags when capabilities diverge from declared intent. All decisions are audit-logged.
+**Layer 2: Policy enforcement (recommended).** The guard. Every capability grant is evaluated against a deny-by-default policy before the sandbox starts. The policy engine checks agent identity, intent, tool name, and parameter constraints. Drift detection flags when capabilities diverge from declared intent. All decisions are audit-logged.
 
 **Layer 3: Linux namespace isolation (opt-in with --bwrap).** The outer wall. Wraps the entire wasmtime process in a bubblewrap sandbox with unshared namespaces (PID, network, IPC, UTS, cgroup). Defense in depth against wasmtime runtime bugs.
 
@@ -43,9 +43,9 @@ Without capability grants, a sandboxed program **cannot**:
 
 All of these return errors inside the sandbox, typically "No such file or directory" (WASI errno 44).
 
-**Layer 2 (arbiter policy enforcement) blocks:**
+**Layer 2 (policy enforcement) blocks:**
 
-With arbiter enabled, even explicitly requested capabilities can be denied:
+With a policy active, even explicitly requested capabilities can be denied:
 
 - A ``--cap fs:write:/path`` grant with no matching allow policy is **denied by default**
 - A write capability in a read-intent session is **flagged as drift**
@@ -54,7 +54,7 @@ With arbiter enabled, even explicitly requested capabilities can be denied:
 - Sessions past their time limit are **expired**
 - Agent trust levels that do not meet policy requirements are **denied**
 
-Without arbiter, none of these checks exist. The operator's flags are granted unconditionally.
+Without a policy, none of these checks exist. The operator's flags are granted unconditionally.
 
 **Layer 3 (bubblewrap) blocks:**
 
@@ -74,14 +74,14 @@ How isolation works
 
 **No ambient authority.** Unlike a regular process on Linux, a WASM module does not inherit any capabilities from its parent. There is no implicit access to the filesystem, no implicit network access, no implicit environment. Everything starts empty.
 
-**Arbiter policy mediation.** When ``--arbiter`` is active, the arbiter gate sits between capability requests and the WASI context builder. Each grant is evaluated against policy rules with specificity-based ordering. Deny-by-default means no matching policy results in denial. Drift detection compares each grant's operation type against the declared session intent. The audit log records every decision with full context: timestamp, tool name, arguments, matched policy, agent ID, session ID.
+**Policy mediation.** When ``--policy`` is active, the policy gate sits between capability requests and the WASI context builder. Each grant is evaluated against policy rules with specificity-based ordering. Deny-by-default means no matching policy results in denial. Drift detection compares each grant's operation type against the declared session intent. The audit log records every decision with full context: timestamp, tool name, arguments, matched policy, agent ID, session ID.
 
-This creates a structural separation between requesting and receiving a capability. Without arbiter, there is no such separation — the operator is simultaneously the requester and the approver.
+This creates a structural separation between requesting and receiving a capability. Without a policy, there is no such separation -- the operator is simultaneously the requester and the approver.
 
 The trust model
 ---------------
 
-**With arbiter (recommended):**
+**With policy enforcement (recommended):**
 
 - The policy file is the authorization authority
 - The operator requests capabilities; the policy decides
@@ -89,7 +89,7 @@ The trust model
 - All decisions are recorded for auditing
 - Assumption: the policy file is reviewed and version-controlled
 
-**Without arbiter (simple mode, not recommended):**
+**Without policy enforcement (simple mode, not recommended):**
 
 - The operator is the authorization authority
 - The operator requests capabilities and grants them to themselves
@@ -108,7 +108,7 @@ What the sandbox does NOT protect against
 
 **Side channels.** Timing-based side channels and other covert channels are not addressed. If this matters for your use case, you need hardware-level isolation (VMs).
 
-**Granted capabilities.** If you grant ``--cap net:*``, the program can phone home. If you grant ``--cap fs:write:/``, it can delete your files. The sandbox only restricts what you do not grant. Arbiter policy can prevent overly broad grants from being approved, but only if the policy rules cover those cases.
+**Granted capabilities.** If you grant ``--cap net:*``, the program can phone home. If you grant ``--cap fs:write:/``, it can delete your files. The sandbox only restricts what you do not grant. Policy enforcement can prevent overly broad grants from being approved, but only if the policy rules cover those cases.
 
 Comparison with other isolation tools
 -------------------------------------
@@ -121,12 +121,12 @@ Comparison with other isolation tools
      - Policy enforcement
      - Compatibility
      - Overhead
-   * - **containment + arbiter**
+   * - **codejail + policy**
      - Capability-based + policy
      - Deny-by-default with drift detection
      - Programs must target wasm32-wasip1
      - ~1.5x native
-   * - **containment (simple mode)**
+   * - **codejail (simple mode)**
      - Capability-based
      - None (operator-granted only)
      - Programs must target wasm32-wasip1
@@ -152,9 +152,9 @@ Comparison with other isolation tools
      - Any Linux binary
      - ~1x native
 
-Containment with arbiter trades compatibility (programs must be compiled to WASM) for a stronger security posture: deny-by-default capabilities, policy-enforced authorization, drift detection, and structured auditing.
+Codejail with policy enforcement trades compatibility (programs must be compiled to WASM) for a stronger security posture: deny-by-default capabilities, policy-enforced authorization, drift detection, and structured auditing.
 
 Reporting vulnerabilities
 -------------------------
 
-If you find a security issue in containment, please open an issue on GitHub. If the issue is sensitive (sandbox escape), email the maintainers instead of posting publicly.
+If you find a security issue in codejail, please open an issue on GitHub. If the issue is sensitive (sandbox escape), email the maintainers instead of posting publicly.

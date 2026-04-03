@@ -1,4 +1,4 @@
-# Arbiter policy for audit trail demo.
+# Policy for audit trail demo.
 # Allows fs_read and env_read. Denies net_connect and fs_write.
 
 [[policies]]

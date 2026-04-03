@@ -2,7 +2,7 @@ use std::fs;
 
 fn main() {
     let path = "/workspace/report.txt";
-    let content = "Containment report: all systems nominal.";
+    let content = "Sandbox report: all systems nominal.";
 
     println!("Writing to {path}...");
     match fs::write(path, content) {

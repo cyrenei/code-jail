@@ -1,7 +1,7 @@
-Containmentfile reference
-=========================
+JailFile reference
+==================
 
-A Containmentfile is a TOML file that declares the capabilities and limits for a sandbox. It is the equivalent of a Dockerfile, but for permissions rather than build steps.
+A JailFile is a TOML file that declares the capabilities and limits for a sandbox. It is the equivalent of a Dockerfile, but for permissions rather than build steps.
 
 Format
 ------
@@ -102,17 +102,17 @@ Sections
 Usage
 -----
 
-Build an image from a Containmentfile:
+Build an image from a JailFile:
 
 .. code-block:: bash
 
-   $ containment build .
-   $ containment build /path/to/project -f custom-containmentfile.toml
+   $ codejail build .
+   $ codejail build /path/to/project -f custom-jailfile.toml
 
-Run with a Containmentfile (apply its capabilities):
+Run with a JailFile (apply its capabilities):
 
 .. code-block:: bash
 
-   $ containment run my-image -f Containmentfile.toml
+   $ codejail run my-image -f JailFile.toml
 
-When you use ``-f``, the Containmentfile capabilities are the base set. Any ``--cap`` flags you add on the command line are merged on top.
+When you use ``-f``, the JailFile capabilities are the base set. Any ``--cap`` flags you add on the command line are merged on top.

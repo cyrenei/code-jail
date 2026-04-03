@@ -53,14 +53,13 @@ impl Container {
     }
 }
 
-/// Persistent store for container metadata
 pub struct ContainerStore {
     dir: PathBuf,
 }
 
 impl ContainerStore {
     pub fn new() -> anyhow::Result<Self> {
-        let dir = containment_home().join("containers");
+        let dir = codejail_home().join("containers");
         std::fs::create_dir_all(&dir)?;
         Ok(Self { dir })
     }
@@ -72,12 +71,10 @@ impl ContainerStore {
     }
 
     pub fn load(&self, id_or_prefix: &str) -> anyhow::Result<Container> {
-        // Exact match
         let exact = self.dir.join(format!("{id_or_prefix}.json"));
         if exact.exists() {
             return Ok(serde_json::from_str(&std::fs::read_to_string(exact)?)?);
         }
-        // Prefix match
         for entry in std::fs::read_dir(&self.dir)? {
             let entry = entry?;
             let fname = entry.file_name();
@@ -88,7 +85,6 @@ impl ContainerStore {
                 )?)?);
             }
         }
-        // Name match
         for entry in std::fs::read_dir(&self.dir)? {
             let entry = entry?;
             let json = std::fs::read_to_string(entry.path())?;
@@ -125,7 +121,6 @@ impl ContainerStore {
         Ok(())
     }
 
-    /// Remove all stopped/failed containers
     pub fn prune(&self) -> anyhow::Result<usize> {
         let mut count = 0;
         for c in self.list()? {
@@ -138,12 +133,12 @@ impl ContainerStore {
     }
 }
 
-pub fn containment_home() -> PathBuf {
-    std::env::var("CONTAINMENT_HOME")
+pub fn codejail_home() -> PathBuf {
+    std::env::var("CODEJAIL_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             std::env::var("HOME")
-                .map(|h| PathBuf::from(h).join(".containment"))
-                .unwrap_or_else(|_| PathBuf::from("/tmp/.containment"))
+                .map(|h| PathBuf::from(h).join(".codejail"))
+                .unwrap_or_else(|_| PathBuf::from("/tmp/.codejail"))
         })
 }

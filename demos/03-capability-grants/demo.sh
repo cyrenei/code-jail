@@ -7,12 +7,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="${SCRIPT_DIR}/../.."
-CONTAINMENT="${ROOT}/target/release/containment"
-if [ ! -x "$CONTAINMENT" ]; then
-  CONTAINMENT="${ROOT}/target/debug/containment"
+CODEJAIL="${ROOT}/target/release/codejail"
+if [ ! -x "$CODEJAIL" ]; then
+  CODEJAIL="${ROOT}/target/debug/codejail"
 fi
-if [ ! -x "$CONTAINMENT" ]; then
-  echo -e "\033[0;31mNo containment binary found. Run 'cargo build' first.\033[0m"
+if [ ! -x "$CODEJAIL" ]; then
+  echo -e "\033[0;31mNo codejail binary found. Run 'cargo build' first.\033[0m"
   exit 1
 fi
 
@@ -24,7 +24,7 @@ NC='\033[0m'
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
-export CONTAINMENT_HOME="$TMPDIR/state"
+export CODEJAIL_HOME="$TMPDIR/state"
 
 echo ""
 echo -e "${BOLD}════════════════════════════════════════════════════════════${NC}"
@@ -54,14 +54,14 @@ echo ""
 echo -e "${BOLD}-- RUN: With volume mount -v $WORKSPACE:/workspace --${NC}"
 echo ""
 
-OUTPUT=$("$CONTAINMENT" run -v "$WORKSPACE:/workspace" "$TMPDIR/program.wasm" 2>&1)
+OUTPUT=$("$CODEJAIL" run -v "$WORKSPACE:/workspace" "$TMPDIR/program.wasm" 2>&1)
 echo "$OUTPUT" | while IFS= read -r line; do
   case "$line" in
     *"succeeded"*|*"Contents:"*)
       echo -e "  ${GREEN}$line${NC}" ;;
     *"failed"*)
       echo -e "  ${RED}$line${NC}" ;;
-    *"[containment]"*)
+    *"[codejail]"*)
       echo -e "  ${YELLOW}$line${NC}" ;;
     *)
       echo "  $line" ;;

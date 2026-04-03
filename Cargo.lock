@@ -134,7 +134,9 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "arbiter-audit"
-version = "0.0.11"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51d47376ca1f4bcaf0881e48cca268969019f48b2084e6a896f6ed72d6d59912"
 dependencies = [
  "blake3",
  "chrono",
@@ -149,7 +151,9 @@ dependencies = [
 
 [[package]]
 name = "arbiter-behavior"
-version = "0.0.11"
+version = "0.0.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de1fa56af9cf9ef1e32136509ec0054f85bb31c72ee1058401cea8c067ad7744"
 dependencies = [
  "arbiter-mcp",
  "chrono",
@@ -164,7 +168,9 @@ dependencies = [
 
 [[package]]
 name = "arbiter-identity"
-version = "0.0.11"
+version = "0.0.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc8fd1212417fcc9be148670a4a56e31a619bcfc33db613b4f76537f26569062"
 dependencies = [
  "arbiter-storage",
  "chrono",
@@ -178,7 +184,9 @@ dependencies = [
 
 [[package]]
 name = "arbiter-mcp"
-version = "0.0.11"
+version = "0.0.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06a77da8695a60eb7e95aa977d2ce5cdfe7b67536c366674f0ffcfd7447eb2b6"
 dependencies = [
  "serde",
  "serde_json",
@@ -188,7 +196,9 @@ dependencies = [
 
 [[package]]
 name = "arbiter-policy"
-version = "0.0.11"
+version = "0.0.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9028a4ab7fa5e302391ab2e0e95ac8201a1f0e21a44348edf089fb33d2ecb882"
 dependencies = [
  "arbiter-identity",
  "arbiter-mcp",
@@ -206,7 +216,9 @@ dependencies = [
 
 [[package]]
 name = "arbiter-session"
-version = "0.0.11"
+version = "0.0.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fe2e8bcafb74b4a2ea70cfabbc24b7fa5ce66c17491669324b6f59cef421f53"
 dependencies = [
  "arbiter-storage",
  "chrono",
@@ -220,7 +232,9 @@ dependencies = [
 
 [[package]]
 name = "arbiter-storage"
-version = "0.0.11"
+version = "0.0.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99e6a91bd857aab6e1b966a9690ecdd702772e4390a2f08978ef3b9c13a5ea10"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -537,19 +551,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "colorchoice"
-version = "1.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
-
-[[package]]
-name = "constant_time_eq"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
-
-[[package]]
-name = "containment"
+name = "codejail"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -573,6 +575,18 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
 ]
+
+[[package]]
+name = "colorchoice"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
+
+[[package]]
+name = "constant_time_eq"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "core-foundation-sys"
@@ -1329,9 +1343,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.13.0"
+version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7714e70437a7dc3ac8eb7e6f8df75fd8eb422675fc7678aff7364301092b1017"
+checksum = "45a8a2b9cb3e0b0c1803dbb0758ffac5de2f425b23c28f518faabd9d805342ff"
 dependencies = [
  "equivalent",
  "hashbrown 0.16.1",
@@ -3487,9 +3501,9 @@ dependencies = [
 
 [[package]]
 name = "writeable"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9edde0db4769d2dc68579893f2306b26c6ecfbe0ef499b013d731b7b9247e0b9"
+checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "yoke"

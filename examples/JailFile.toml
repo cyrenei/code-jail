@@ -1,4 +1,4 @@
-# Example Containmentfile — capability manifest for a sandboxed agent
+# Example JailFile — capability manifest for a sandboxed agent
 [sandbox]
 name = "my-agent"
 entrypoint = "agent.wasm"

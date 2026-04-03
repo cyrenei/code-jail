@@ -1,8 +1,8 @@
-# containment
+# codejail
 
-A WASM sandbox with policy-enforced access control. Run untrusted programs where every capability is deny-by-default and every grant is evaluated against policy.
+A WASM sandbox with policy-enforced access control. Run untrusted programs where every capability is deny-by-default and every grant is checked against policy before it takes effect.
 
-The sandbox is the cell. The [arbiter](arbiter-mcp-firewall/) is the guard. Together they form containment.
+The sandbox is the cell. The policy engine is the guard. Together they form codejail.
 
 Built on [wasmtime](https://wasmtime.dev/) (WASI preview 1). Written in Rust.
 
@@ -14,12 +14,12 @@ The fastest way to install is the one-liner, which downloads a pre-built binary:
 curl -sSf https://raw.githubusercontent.com/cyrenei/containment/main/install.sh | sh
 ```
 
-This detects your OS and architecture, downloads the right binary from GitHub Releases, verifies the SHA256 checksum, and drops it into `~/.containment/bin/`.
+This detects your OS and architecture, downloads the right binary from GitHub Releases, verifies the SHA256 checksum, and drops it into `~/.codejail/bin/`.
 
 You can also pin a version or change the install directory:
 
 ```bash
-CONTAINMENT_VERSION=v0.1.0 CONTAINMENT_INSTALL_DIR=/usr/local/bin curl -sSf \
+CODEJAIL_VERSION=v0.1.0 CODEJAIL_INSTALL_DIR=/usr/local/bin curl -sSf \
   https://raw.githubusercontent.com/cyrenei/containment/main/install.sh | sh
 ```
 
@@ -36,10 +36,10 @@ cargo install --path .
 **Docker** (no install needed):
 
 ```bash
-docker run --rm containment info
+docker run --rm codejail info
 ```
 
-If you want to build Rust source files into WASM (using `containment build`), you also need the compilation target:
+If you want to build Rust source files into WASM (using `codejail build`), you also need the compilation target:
 
 ```bash
 rustup target add wasm32-wasip1
@@ -48,18 +48,18 @@ rustup target add wasm32-wasip1
 ## Quick start
 
 ```bash
-# Run a WASM module with arbiter policy enforcement.
+# Run a WASM module with policy enforcement.
 # Every capability grant is evaluated against policy before the sandbox starts.
-containment run program.wasm --arbiter policy.toml
+codejail run program.wasm --policy policy.toml
 
-# Grant read access — arbiter evaluates the grant against policy before allowing it
-containment run agent.wasm \
-  --arbiter policy.toml \
+# Grant read access -- policy evaluates the grant before allowing it
+codejail run agent.wasm \
+  --policy policy.toml \
   --cap fs:read:/home/you/project
 
 # Declare intent so drift detection can flag mismatches
-containment run agent.wasm \
-  --arbiter policy.toml \
+codejail run agent.wasm \
+  --policy policy.toml \
   --intent "read and analyze source code" \
   --audit-log audit.jsonl \
   -v ./project:/workspace \
@@ -67,24 +67,24 @@ containment run agent.wasm \
   -e API_KEY
 
 # Build a Rust source file into a WASM image
-containment build .
+codejail build .
 
 # List your images and containers
-containment images
-containment ps -a
+codejail images
+codejail ps -a
 ```
 
 ## How it works
 
-Containment has two layers that work together:
+Codejail has two layers that work together:
 
-**The cell: WASM capability isolation.** Programs run as WebAssembly modules inside wasmtime. They start with nothing — no filesystem, no network, no environment variables. You grant capabilities explicitly with `--cap` flags.
+**The cell: WASM capability isolation.** Programs run as WebAssembly modules inside wasmtime. They start with nothing -- no filesystem, no network, no environment variables. You grant capabilities explicitly with `--cap` flags.
 
-**The guard: arbiter policy enforcement.** When you pass `--arbiter policy.toml`, every capability grant is evaluated against a deny-by-default policy before the sandbox starts. The policy can allow, deny, or flag each grant. Drift detection catches when requested capabilities don't match declared intent. Every decision is audit-logged.
+**The guard: policy enforcement.** When you pass `--policy policy.toml`, every capability grant is evaluated against a deny-by-default policy before the sandbox starts. The policy engine can allow, deny, or flag each grant. Drift detection catches when requested capabilities don't match declared intent. Every decision is audit-logged.
 
-Without arbiter, the operator's capability requests are granted unconditionally — there is no gap between requesting a capability and receiving it, so there is nowhere for security policy to live.
+Without a policy file, the operator's capability requests are granted unconditionally -- there is no gap between requesting a capability and receiving it, so there is nowhere for security policy to live.
 
-## Arbiter policy
+## Policy enforcement
 
 A policy file controls what capabilities are allowed:
 
@@ -106,13 +106,13 @@ reason = "Write access requires explicit policy approval"
 
 With this policy:
 - `--cap fs:read:/project` with `--intent "read and analyze"` is **allowed**
-- `--cap fs:write:/project` is **denied** (no matching allow policy)
+- `--cap fs:write:/project` is **denied** (no matching allow rule)
 
-Full policy language reference: [Policy Guide](arbiter-mcp-firewall/docs/sphinx/guides/policy.md)
+Full policy language reference: [Policy Guide](https://github.com/cyrenei/arbiter-mcp-firewall/blob/main/docs/sphinx/guides/policy.md)
 
-## What arbiter enforces
+## What the policy gate enforces
 
-| Enforcement | Without arbiter | With arbiter |
+| Enforcement | Without policy | With policy |
 |---|---|---|
 | Capability authorization | Operator's flags are final | Policy evaluates every grant |
 | Intent verification | Not tracked | Drift detection flags mismatches |
@@ -124,7 +124,7 @@ Full policy language reference: [Policy Guide](arbiter-mcp-firewall/docs/sphinx/
 
 ## Capability model
 
-Containment uses a deny-by-default capability model. When you run a module with no flags, it gets nothing. Every permission is an explicit grant.
+Codejail uses a deny-by-default capability model. When you run a module with no flags, it gets nothing. Every permission is an explicit grant.
 
 | Flag | What it grants |
 |------|---------------|
@@ -138,11 +138,11 @@ Containment uses a deny-by-default capability model. When you run a module with 
 | `-e KEY=VALUE` | Set an environment variable |
 | `--net` | Allow all network access |
 | `--bwrap` | Wrap in a bubblewrap namespace sandbox (defense in depth) |
-| `--arbiter policy.toml` | Evaluate all grants against arbiter policy |
+| `--policy policy.toml` | Evaluate all grants against policy |
 | `--intent "description"` | Declare session intent for drift detection |
-| `--audit-log path.jsonl` | Write arbiter decisions to audit log |
+| `--audit-log path.jsonl` | Write policy decisions to audit log |
 
-Capabilities compose. You can pass as many `--cap` flags as you need. With arbiter enabled, each capability is individually evaluated against policy before being granted to the runtime. Denied capabilities are removed. The audit log records every decision.
+Capabilities compose. You can pass as many `--cap` flags as you need. With policy enabled, each capability is individually evaluated before being granted to the runtime. Denied capabilities are removed. The audit log records every decision.
 
 ## Resource limits
 
@@ -155,35 +155,35 @@ When a program exceeds its fuel budget, it gets terminated immediately. The time
 
 ## Simple mode (not recommended)
 
-You can run containment without arbiter:
+You can run codejail without a policy file:
 
 ```bash
-containment run program.wasm --cap fs:read:/project
+codejail run program.wasm --cap fs:read:/project
 ```
 
 This grants capabilities directly to the sandbox with no policy evaluation, no drift detection, no session tracking, and no audit trail. The operator's flags are the only authorization layer.
 
-Simple mode is useful for quick local testing but is **not recommended for production use or when running untrusted agents**. Without arbiter, there is no separation between who requests capabilities and who approves them.
+Simple mode is useful for quick local testing but is **not recommended for production use or when running untrusted agents**. Without policy enforcement, there is no separation between who requests capabilities and who approves them.
 
 ## CLI reference
 
 ```
-containment run <image> [flags] [-- args...]    Run a WASM module in a sandbox
-containment build [dir] [-f Containmentfile.toml]      Build from a Containmentfile
-containment ps [-a]                             List containers
-containment stop <id>                           Stop a running container
-containment rm <id>                             Remove a stopped container
-containment prune                               Remove all stopped containers
-containment images                              List images
-containment import <name> <path.wasm>           Import a WASM module as an image
-containment rmi <name>                          Remove an image
-containment inspect <image>                     Show module exports and imports
-containment info                                Show system info and capabilities
+codejail run <image> [flags] [-- args...]         Run a WASM module in a sandbox
+codejail build [dir] [-f JailFile.toml]           Build from a JailFile
+codejail ps [-a]                                  List containers
+codejail stop <id>                                Stop a running container
+codejail rm <id>                                  Remove a stopped container
+codejail prune                                    Remove all stopped containers
+codejail images                                   List images
+codejail import <name> <path.wasm>                Import a WASM module as an image
+codejail rmi <name>                               Remove an image
+codejail inspect <image>                          Show module exports and imports
+codejail info                                     Show system info and capabilities
 ```
 
-## Containmentfile
+## JailFile
 
-A Containmentfile is a TOML manifest that declares what a sandbox is allowed to do. Think of it like a Dockerfile but for permissions.
+A JailFile is a TOML manifest that declares what a sandbox is allowed to do. Think of it like a Dockerfile but for permissions.
 
 ```toml
 [sandbox]
@@ -205,7 +205,7 @@ wall_time_secs = 300
 memory_mb = 512
 ```
 
-Use it with `containment run <image> -f Containmentfile.toml --arbiter policy.toml` or build with `containment build`.
+Use it with `codejail run <image> -f JailFile.toml --policy policy.toml` or build with `codejail build`.
 
 ## Security model
 
@@ -213,7 +213,7 @@ The sandbox has three layers of defense:
 
 **Layer 1: WASM capability isolation (always on).** The program runs as a WebAssembly module inside wasmtime. It can only access what the WASI runtime explicitly grants: preopened directories, network sockets, environment variables. Everything else returns "not found" errors. There is no /etc/passwd, no /proc, no home directory unless you mount one.
 
-**Layer 2: Arbiter policy enforcement (recommended).** Every capability grant is evaluated against a deny-by-default policy. The policy engine checks agent identity, intent, tool name, and parameter constraints. Drift detection flags when capabilities diverge from declared intent. All decisions are audit-logged. This layer creates the gap between requesting and receiving a capability — the gap where security policy lives.
+**Layer 2: Policy enforcement (recommended).** Every capability grant is evaluated against a deny-by-default policy. The policy engine checks agent identity, intent, tool name, and parameter constraints. Drift detection flags when capabilities diverge from declared intent. All decisions are audit-logged. This layer creates the gap between requesting and receiving a capability -- the gap where security policy lives.
 
 **Layer 3: Linux namespace isolation (opt-in with --bwrap).** Wraps the entire wasmtime process in a bubblewrap sandbox with unshared namespaces (PID, network, IPC, UTS, cgroup). This is defense in depth against wasmtime runtime bugs.
 
@@ -229,7 +229,7 @@ Without explicit grants, a sandboxed program cannot:
 - Access your home directory
 - Phone home or exfiltrate data
 
-With arbiter enabled, even explicitly requested capabilities can be denied by policy, flagged by drift detection, or limited by session budgets.
+With policy enabled, even explicitly requested capabilities can be denied by policy, flagged by drift detection, or limited by session budgets.
 
 ### Known limitations
 
@@ -242,20 +242,20 @@ With arbiter enabled, even explicitly requested capabilities can be denied by po
 
 ```bash
 # Build the image
-docker build -t containment .
+docker build -t codejail .
 
 # Run a command
-docker run --rm containment info
+docker run --rm codejail info
 
 # Run a WASM module from a host directory
-docker run --rm -v ./workspace:/data/workspace containment run /data/workspace/program.wasm
+docker run --rm -v ./workspace:/data/workspace codejail run /data/workspace/program.wasm
 
 # For --bwrap support, the container needs extra privileges:
 docker run --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
-  containment run --bwrap program.wasm
+  codejail run --bwrap program.wasm
 
 # Or use docker compose
-docker compose run --rm containment info
+docker compose run --rm codejail info
 ```
 
 ## Building from source
@@ -283,4 +283,4 @@ sphinx-build docs docs/_build/html
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE).

@@ -1,8 +1,8 @@
-//! Arbiter MCP Firewall integration.
+//! Policy enforcement integration.
 //!
-//! When arbiter mode is active (--arbiter <policy.toml>), every capability
-//! request is evaluated against an arbiter policy before WASI is configured.
-//! Each sandbox run creates an arbiter session. Denied capabilities are
+//! When policy mode is active (--policy <policy.toml>), every capability
+//! request is evaluated against a deny-by-default policy before WASI is configured.
+//! Each sandbox run creates a session. Denied capabilities are
 //! rejected. All decisions are audit-logged.
 
 use std::path::Path;
@@ -18,8 +18,8 @@ use uuid::Uuid;
 
 use crate::capability::{CapGrant, FsMount, ResolvedCaps};
 
-/// Arbiter integration state for a containment session.
-pub struct ArbiterGate {
+/// Policy gate state for a codejail session.
+pub struct PolicyGate {
     policy: PolicyConfig,
     registry: InMemoryRegistry,
     sessions: SessionStore,
@@ -27,7 +27,7 @@ pub struct ArbiterGate {
     anomaly: AnomalyDetector,
 }
 
-/// Result of evaluating a single capability through arbiter.
+/// Result of evaluating a single capability through the policy engine.
 #[derive(Debug)]
 pub struct CapDecision {
     pub tool_name: String,
@@ -36,8 +36,8 @@ pub struct CapDecision {
     pub policy_id: Option<String>,
 }
 
-/// Summary of arbiter evaluation for an entire run.
-pub struct ArbiterVerdict {
+/// Summary of policy evaluation for an entire run.
+pub struct PolicyVerdict {
     pub session: TaskSession,
     pub agent: Agent,
     pub decisions: Vec<CapDecision>,
@@ -45,8 +45,8 @@ pub struct ArbiterVerdict {
     pub denied_count: usize,
 }
 
-impl ArbiterGate {
-    /// Load arbiter policy from a TOML file and initialize the gate.
+impl PolicyGate {
+    /// Load policy from a TOML file and initialize the gate.
     pub fn load(policy_path: &Path, audit_path: Option<&Path>) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(policy_path)?;
         let mut policy: PolicyConfig = toml::from_str(&content)?;
@@ -66,7 +66,7 @@ impl ArbiterGate {
         })
     }
 
-    /// Register a WASM image as an arbiter agent.
+    /// Register a WASM image as an agent.
     pub async fn register_agent(
         &self,
         image_name: &str,
@@ -76,7 +76,7 @@ impl ArbiterGate {
         let agent = self
             .registry
             .register_agent(
-                "containment".to_string(),
+                "codejail".to_string(),
                 image_name.to_string(),
                 capabilities,
                 trust_level,
@@ -87,7 +87,7 @@ impl ArbiterGate {
         Ok(agent)
     }
 
-    /// Create an arbiter session for a sandbox run.
+    /// Create a session for a sandbox run.
     pub async fn create_session(
         &self,
         agent: &Agent,
@@ -111,9 +111,9 @@ impl ArbiterGate {
             .await
     }
 
-    /// Evaluate all capability grants against arbiter policy.
+    /// Evaluate all capability grants against policy.
     ///
-    /// Returns an ArbiterVerdict with the authorized subset of caps,
+    /// Returns a PolicyVerdict with the authorized subset of caps,
     /// plus audit logs for every decision.
     #[allow(clippy::too_many_arguments)]
     pub async fn evaluate_caps(
@@ -126,7 +126,7 @@ impl ArbiterGate {
         net_flag: bool,
         call_budget: u64,
         time_limit_secs: u64,
-    ) -> anyhow::Result<ArbiterVerdict> {
+    ) -> anyhow::Result<PolicyVerdict> {
         // Register agent for this WASM image
         let cap_names: Vec<String> =
             Self::extract_cap_names(grants, volumes, env_overrides, net_flag);
@@ -150,7 +150,7 @@ impl ArbiterGate {
             agent: agent.clone(),
             delegation_chain: vec![],
             declared_intent: intent.to_string(),
-            principal_sub: "containment-operator".to_string(),
+            principal_sub: "codejail-operator".to_string(),
             principal_groups: vec!["sandbox-runners".to_string()],
         };
 
@@ -288,7 +288,7 @@ impl ArbiterGate {
             inherit_stdio: true,
         };
 
-        Ok(ArbiterVerdict {
+        Ok(PolicyVerdict {
             session,
             agent,
             decisions,
@@ -365,7 +365,7 @@ impl ArbiterGate {
             .detect(&ctx.declared_intent, op_type, tool_name);
         if !matches!(anomaly_response, arbiter_behavior::AnomalyResponse::Normal) {
             eprintln!(
-                "[containment] drift detected: {tool_name} ({op_type:?}) vs intent '{}'",
+                "[codejail] drift detected: {tool_name} ({op_type:?}) vs intent '{}'",
                 ctx.declared_intent
             );
         }
@@ -408,7 +408,7 @@ impl ArbiterGate {
         };
 
         if let Err(e) = self.audit.write(&entry).await {
-            eprintln!("[containment] audit write failed: {e}");
+            eprintln!("[codejail] audit write failed: {e}");
         }
     }
 
