@@ -1,8 +1,8 @@
 # containment
 
-A WASM sandbox that works like Docker. Run untrusted programs with deny-by-default capabilities.
+A WASM sandbox with policy-enforced access control. Run untrusted programs where every capability is deny-by-default and every grant is evaluated against policy.
 
-Nothing is allowed unless you say so. No filesystem access, no network, no environment variables. You grant what you want, and the sandbox enforces the rest.
+The sandbox is the cell. The [arbiter](arbiter-mcp-firewall/) is the guard. Together they form containment.
 
 Built on [wasmtime](https://wasmtime.dev/) (WASI preview 1). Written in Rust.
 
@@ -48,15 +48,20 @@ rustup target add wasm32-wasip1
 ## Quick start
 
 ```bash
-# Run a WASM module in a fully isolated sandbox.
-# No filesystem, no network, no env vars. Just stdout/stderr.
-containment run program.wasm
+# Run a WASM module with arbiter policy enforcement.
+# Every capability grant is evaluated against policy before the sandbox starts.
+containment run program.wasm --arbiter policy.toml
 
-# Give it read access to your project directory
-containment run agent.wasm --cap fs:read:/home/you/project
-
-# Mount a working directory and allow one API endpoint
+# Grant read access — arbiter evaluates the grant against policy before allowing it
 containment run agent.wasm \
+  --arbiter policy.toml \
+  --cap fs:read:/home/you/project
+
+# Declare intent so drift detection can flag mismatches
+containment run agent.wasm \
+  --arbiter policy.toml \
+  --intent "read and analyze source code" \
+  --audit-log audit.jsonl \
   -v ./project:/workspace \
   --cap net:api.openai.com:443 \
   -e API_KEY
@@ -68,6 +73,54 @@ containment build .
 containment images
 containment ps -a
 ```
+
+## How it works
+
+Containment has two layers that work together:
+
+**The cell: WASM capability isolation.** Programs run as WebAssembly modules inside wasmtime. They start with nothing — no filesystem, no network, no environment variables. You grant capabilities explicitly with `--cap` flags.
+
+**The guard: arbiter policy enforcement.** When you pass `--arbiter policy.toml`, every capability grant is evaluated against a deny-by-default policy before the sandbox starts. The policy can allow, deny, or flag each grant. Drift detection catches when requested capabilities don't match declared intent. Every decision is audit-logged.
+
+Without arbiter, the operator's capability requests are granted unconditionally — there is no gap between requesting a capability and receiving it, so there is nowhere for security policy to live.
+
+## Arbiter policy
+
+A policy file controls what capabilities are allowed:
+
+```toml
+[[policies]]
+id = "allow-read-basic"
+effect = "allow"
+allowed_tools = ["fs_read", "env_read"]
+
+[policies.intent_match]
+keywords = ["read", "analyze"]
+
+[[policies]]
+id = "deny-write-default"
+effect = "deny"
+allowed_tools = ["fs_write"]
+reason = "Write access requires explicit policy approval"
+```
+
+With this policy:
+- `--cap fs:read:/project` with `--intent "read and analyze"` is **allowed**
+- `--cap fs:write:/project` is **denied** (no matching allow policy)
+
+Full policy language reference: [Policy Guide](arbiter-mcp-firewall/docs/sphinx/guides/policy.md)
+
+## What arbiter enforces
+
+| Enforcement | Without arbiter | With arbiter |
+|---|---|---|
+| Capability authorization | Operator's flags are final | Policy evaluates every grant |
+| Intent verification | Not tracked | Drift detection flags mismatches |
+| Session budgets | No per-call tracking | Call budgets and rate limits |
+| Audit trail | Exit code only | Structured JSONL of every decision |
+| Parameter constraints | None | Policy-defined bounds and allowlists |
+| Session expiry | Capabilities last container lifetime | Sessions expire on time limit |
+| Credential hygiene | Agent sees raw secrets | Response scrubbing across encodings |
 
 ## Capability model
 
@@ -85,8 +138,11 @@ Containment uses a deny-by-default capability model. When you run a module with 
 | `-e KEY=VALUE` | Set an environment variable |
 | `--net` | Allow all network access |
 | `--bwrap` | Wrap in a bubblewrap namespace sandbox (defense in depth) |
+| `--arbiter policy.toml` | Evaluate all grants against arbiter policy |
+| `--intent "description"` | Declare session intent for drift detection |
+| `--audit-log path.jsonl` | Write arbiter decisions to audit log |
 
-Capabilities compose. You can pass as many `--cap` flags as you need.
+Capabilities compose. You can pass as many `--cap` flags as you need. With arbiter enabled, each capability is individually evaluated against policy before being granted to the runtime. Denied capabilities are removed. The audit log records every decision.
 
 ## Resource limits
 
@@ -96,6 +152,18 @@ Capabilities compose. You can pass as many `--cap` flags as you need.
 | `--timeout N` | 300 | Wall-clock timeout in seconds |
 
 When a program exceeds its fuel budget, it gets terminated immediately. The timeout kills it on a wall-clock basis regardless of fuel.
+
+## Simple mode (not recommended)
+
+You can run containment without arbiter:
+
+```bash
+containment run program.wasm --cap fs:read:/project
+```
+
+This grants capabilities directly to the sandbox with no policy evaluation, no drift detection, no session tracking, and no audit trail. The operator's flags are the only authorization layer.
+
+Simple mode is useful for quick local testing but is **not recommended for production use or when running untrusted agents**. Without arbiter, there is no separation between who requests capabilities and who approves them.
 
 ## CLI reference
 
@@ -137,15 +205,17 @@ wall_time_secs = 300
 memory_mb = 512
 ```
 
-Use it with `containment run <image> -f Containmentfile.toml` or build with `containment build`.
+Use it with `containment run <image> -f Containmentfile.toml --arbiter policy.toml` or build with `containment build`.
 
 ## Security model
 
-The sandbox has two layers of isolation:
+The sandbox has three layers of defense:
 
 **Layer 1: WASM capability isolation (always on).** The program runs as a WebAssembly module inside wasmtime. It can only access what the WASI runtime explicitly grants: preopened directories, network sockets, environment variables. Everything else returns "not found" errors. There is no /etc/passwd, no /proc, no home directory unless you mount one.
 
-**Layer 2: Linux namespace isolation (opt-in with --bwrap).** Wraps the entire wasmtime process in a bubblewrap sandbox with unshared namespaces (PID, network, IPC, UTS, cgroup). This is defense in depth against wasmtime runtime bugs.
+**Layer 2: Arbiter policy enforcement (recommended).** Every capability grant is evaluated against a deny-by-default policy. The policy engine checks agent identity, intent, tool name, and parameter constraints. Drift detection flags when capabilities diverge from declared intent. All decisions are audit-logged. This layer creates the gap between requesting and receiving a capability — the gap where security policy lives.
+
+**Layer 3: Linux namespace isolation (opt-in with --bwrap).** Wraps the entire wasmtime process in a bubblewrap sandbox with unshared namespaces (PID, network, IPC, UTS, cgroup). This is defense in depth against wasmtime runtime bugs.
 
 ### What the sandbox blocks
 
@@ -158,6 +228,8 @@ Without explicit grants, a sandboxed program cannot:
 - Discover other processes
 - Access your home directory
 - Phone home or exfiltrate data
+
+With arbiter enabled, even explicitly requested capabilities can be denied by policy, flagged by drift detection, or limited by session budgets.
 
 ### Known limitations
 

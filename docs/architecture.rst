@@ -6,7 +6,7 @@ This page describes how containment is built. It is written for contributors and
 Overview
 --------
 
-Containment is a thin CLI layer on top of wasmtime. The binary is about 30 MB (release build) because it statically links the wasmtime JIT compiler. There are no other runtime dependencies.
+Containment is a thin CLI layer on top of wasmtime with an integrated policy enforcement layer (arbiter). The binary is about 30 MB (release build) because it statically links the wasmtime JIT compiler and the arbiter policy engine. There are no other runtime dependencies.
 
 ::
 
@@ -17,7 +17,12 @@ Containment is a thin CLI layer on top of wasmtime. The binary is about 30 MB (r
     |
     v
    Capability        Resolves --cap flags, volumes, env vars, Containmentfile
-   resolver          into a unified ResolvedCaps
+   resolver          into a unified set of capability grants
+    |
+    v
+   Arbiter gate      Evaluates each grant against policy (deny-by-default).
+   (if enabled)      Drift detection. Audit logging. Session tracking.
+                     Only authorized grants pass through.
     |
     v
    Runtime           Configures wasmtime: Engine, Store, WASI context,
@@ -30,6 +35,8 @@ Containment is a thin CLI layer on top of wasmtime. The binary is about 30 MB (r
    Container         Records run metadata (ID, status, image, time)
    store
 
+Without arbiter (simple mode), the capability resolver feeds directly into the runtime with no policy evaluation step. This is not recommended for production use.
+
 Source layout
 -------------
 
@@ -37,6 +44,8 @@ Source layout
 
    src/
      main.rs          CLI with clap. Each subcommand is a function.
+     arbiter.rs       Arbiter MCP Firewall integration. Policy evaluation,
+                      drift detection, audit logging for each cap grant.
      capability.rs    Containmentfile parsing, CapGrant enum, ResolvedCaps.
      runtime.rs       SandboxRuntime: builds WASI context, runs modules.
      container.rs     Container struct, ContainerStore (JSON files).
@@ -46,32 +55,56 @@ Source layout
 The run command in detail
 -------------------------
 
-Here is what happens during ``containment run agent.wasm --cap fs:read:/project --cap net:*``:
+Here is what happens during ``containment run agent.wasm --arbiter policy.toml --intent "read" --cap fs:read:/project --cap net:*``:
 
 1. **Image resolution.** The CLI checks if ``agent.wasm`` is a file path. If not, it looks in ``~/.containment/images/``. If still not found, it errors out.
 
 2. **Capability parsing.** Each ``--cap`` string is parsed into a ``CapGrant`` variant: ``Fs(FsMount)``, ``Net(String)``, or ``Env(Vec<String>)``. Volume mounts (``-v``) and env flags (``-e``) are also converted to grants.
 
-3. **Capability resolution.** If a Containmentfile is loaded (``-f``), its capabilities are the base. CLI grants are merged on top. The result is a ``ResolvedCaps`` with three lists: filesystem mounts, network rules, and environment variables.
+3. **Arbiter policy evaluation (if --arbiter).** The arbiter gate loads the policy file and initializes the enforcement pipeline:
 
-4. **Engine creation.** A wasmtime ``Engine`` is created with fuel consumption enabled (unless ``--fuel 0``).
+   a. **Agent registration.** The WASM image is registered as an arbiter agent.
+   b. **Session creation.** A new task session is created with call budget and time limit.
+   c. **Per-grant evaluation.** Each capability grant is converted to an MCP tool call and evaluated against the deny-by-default policy engine. Only grants with a matching ``allow`` policy pass through.
+   d. **Drift detection.** Each grant's operation type (read, write, admin) is compared against the declared ``--intent``. Mismatches are flagged as behavioral anomalies.
+   e. **Audit logging.** Every decision (allowed, denied, drift-flagged) is written to the audit log as structured JSONL.
+   f. **Authorized capabilities.** Only the grants that survived policy evaluation become the ``ResolvedCaps`` for the runtime.
 
-5. **WASI context.** A ``WasiCtxBuilder`` is configured:
+   Without ``--arbiter``, this step is skipped entirely. All parsed grants become capabilities directly — there is no evaluation, no drift detection, no audit trail.
+
+4. **Capability resolution.** The authorized grants (from arbiter) or all grants (simple mode) are resolved into a ``ResolvedCaps`` with three lists: filesystem mounts, network rules, and environment variables.
+
+5. **Engine creation.** A wasmtime ``Engine`` is created with fuel consumption enabled (unless ``--fuel 0``).
+
+6. **WASI context.** A ``WasiCtxBuilder`` is configured:
 
    - Each filesystem mount becomes a preopened directory with the appropriate ``DirPerms`` and ``FilePerms``.
    - Network rules are installed as a ``socket_addr_check`` callback.
    - Environment variables are injected.
    - Stdio is connected to the terminal.
 
-6. **Store creation.** A wasmtime ``Store`` wraps the WASI context. Fuel is set on the store.
+7. **Store creation.** A wasmtime ``Store`` wraps the WASI context. Fuel is set on the store.
 
-7. **Module loading.** The ``.wasm`` file is compiled by wasmtime's Cranelift JIT into native code.
+8. **Module loading.** The ``.wasm`` file is compiled by wasmtime's Cranelift JIT into native code.
 
-8. **Linking.** WASI preview 1 functions are linked into the module. If the module imports something that WASI does not provide, this step fails.
+9. **Linking.** WASI preview 1 functions are linked into the module. If the module imports something that WASI does not provide, this step fails.
 
-9. **Execution.** The ``_start`` function is called. This is the standard WASI entry point for command-line programs.
+10. **Execution.** The ``_start`` function is called. This is the standard WASI entry point for command-line programs.
 
-10. **Completion.** On success or failure, a container record is written to ``~/.containment/containers/``. The exit status, timing, and fuel usage are reported to stderr.
+11. **Completion.** On success or failure, a container record is written to ``~/.containment/containers/``. The exit status, timing, and fuel usage are reported to stderr.
+
+The arbiter gate
+----------------
+
+When ``--arbiter policy.toml`` is passed (or ``ARBITER_POLICY`` is set), the arbiter gate (``src/arbiter.rs``) mediates between capability requests and the runtime. It uses several crates from the ``arbiter-mcp-firewall/`` subdirectory:
+
+- **arbiter-policy**: Deny-by-default policy engine. Evaluates each grant against TOML rules with specificity-based ordering.
+- **arbiter-behavior**: Drift detection. Classifies operations into intent tiers (read/write/admin) and flags mismatches.
+- **arbiter-session**: Session management. Tracks call budgets, time limits, and session IDs.
+- **arbiter-audit**: Structured JSONL logging with automatic argument redaction.
+- **arbiter-identity**: Agent registration with trust levels.
+
+This creates the gap between requesting a capability and receiving it. The gap is where every security guarantee lives: policy enforcement, intent verification, session budgets, and audit trails.
 
 Data directory
 --------------

@@ -57,6 +57,8 @@ We follow standard Rust conventions. A few project-specific things:
 ```
 src/
   main.rs          CLI entry point (clap). Command dispatching.
+  arbiter.rs       Arbiter MCP Firewall integration. Policy evaluation,
+                   drift detection, audit logging for each capability grant.
   capability.rs    Containmentfile parsing, capability types, resolution.
   runtime.rs       Wasmtime wrapper. Builds WASI context, runs modules.
   container.rs     Container state (create, list, stop, remove).
@@ -64,16 +66,17 @@ src/
   sandbox.rs       Bubblewrap outer sandbox (optional defense in depth).
 ```
 
-The flow for `containment run`:
+The flow for `containment run` (with arbiter — the recommended mode):
 
 1. Resolve the image path (direct path or image store lookup)
 2. Parse capability grants from --cap flags, -v volumes, -e env vars
 3. Load Containmentfile if -f is provided
-4. Merge all capabilities into a ResolvedCaps
-5. Build a WasiCtxBuilder with the resolved capabilities
-6. Create a wasmtime Store with fuel limits
-7. Load the module, link WASI, run _start
-8. Record container state (exited / failed)
+4. **Arbiter policy evaluation** (if --arbiter): each grant is evaluated against the deny-by-default policy. Drift detection flags intent-action mismatches. Audit log records every decision. Only authorized grants survive.
+5. Merge authorized capabilities into a ResolvedCaps (without arbiter, all grants pass through unconditionally)
+6. Build a WasiCtxBuilder with the resolved capabilities
+7. Create a wasmtime Store with fuel limits
+8. Load the module, link WASI, run _start
+9. Record container state (exited / failed)
 
 ## Adding new capabilities
 
