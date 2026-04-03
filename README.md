@@ -1,8 +1,8 @@
 # codejail
 
-A WASM sandbox with policy-enforced access control. Run untrusted programs where every capability is deny-by-default and every grant is checked against policy before it takes effect.
+A WASM sandbox for AI agent tool execution. Run tool implementations as WebAssembly modules with deny-by-default capabilities, policy-controlled authorization, intent-drift detection, and full audit trails. Every capability grant is evaluated against policy before the sandbox starts.
 
-The sandbox is the cell. The policy engine is the guard. Together they form codejail.
+Built on the same governance engine as [Arbiter](https://github.com/cyrenei/mcp-proxy-firewall). Arbiter is the firewall — it controls which MCP tool calls an agent is allowed to make. Codejail is the sandbox — it controls what a tool can touch when it runs. Same policy language, different enforcement layer.
 
 Built on [wasmtime](https://wasmtime.dev/) (WASI preview 1). Written in Rust.
 
@@ -74,15 +74,28 @@ codejail images
 codejail ps -a
 ```
 
+## Why?
+
+AI agents act autonomously at machine speed. A single misconfigured agent
+can run DDL on production databases, export customer data, or escalate
+privileges — with nobody in the loop to stop it. [Arbiter](https://github.com/cyrenei/mcp-proxy-firewall) controls which tool calls get through. But when the tool itself is untrusted code, you also need to control what it can access. That's codejail.
+
+Codejail enforces:
+
+- **What** a tool can access (deny-by-default filesystem, network, environment grants)
+- **How much** it can consume (CPU fuel budgets, wall-clock timeouts)
+- **Whether it should** (policy evaluation + drift detection against declared intent)
+- **That you'll know** (structured JSONL audit trail of every capability decision)
+
 ## How it works
 
 Codejail has two layers that work together:
 
-**The cell: WASM capability isolation.** Programs run as WebAssembly modules inside wasmtime. They start with nothing -- no filesystem, no network, no environment variables. You grant capabilities explicitly with `--cap` flags.
+**The gate: policy authorization.** When you pass `--policy policy.toml`, every capability request is evaluated against a deny-by-default policy before execution begins. The policy engine checks tool name, parameters, and declared intent. Drift detection flags when requested capabilities don't match the agent's stated purpose. Every decision is audit-logged as structured JSONL.
 
-**The guard: policy enforcement.** When you pass `--policy policy.toml`, every capability grant is evaluated against a deny-by-default policy before the sandbox starts. The policy engine can allow, deny, or flag each grant. Drift detection catches when requested capabilities don't match declared intent. Every decision is audit-logged.
+**The cell: WASM isolation.** Authorized capabilities are enforced by running the program as a WebAssembly module inside wasmtime. The program starts with nothing — no filesystem, no network, no environment variables. Only policy-approved capabilities are wired in. The WASM boundary guarantees the program cannot exceed what was granted.
 
-Without a policy file, the operator's capability requests are granted unconditionally -- there is no gap between requesting a capability and receiving it, so there is nowhere for security policy to live.
+Without a policy file, the operator's capability requests are granted unconditionally — there is no gap between requesting a capability and receiving it, so there is nowhere for security policy to live.
 
 ## Policy enforcement
 
@@ -209,11 +222,22 @@ Use it with `codejail run <image> -f JailFile.toml --policy policy.toml` or buil
 
 ## Security model
 
-The sandbox has three layers of defense:
+### Trust model
+
+| Actor | Trust level | Rationale |
+|-------|------------|-----------|
+| **Operator** | Trusted | Selects the policy file, declares intent, chooses capability grants |
+| **Policy file** | Authoritative | Defines what capabilities are allowed; not validated for correctness |
+| **WASM module** | Untrusted | Runs inside WASM isolation; can only access policy-approved capabilities |
+| **Declared intent** | Advisory | Used for drift detection, not enforcement; an adversarial agent would lie |
+
+Codejail is designed for scenarios where the operator is trusted but the code being executed is not — for example, running AI-generated tool implementations where the platform controls the policy but doesn't control the code.
+
+### Isolation layers
 
 **Layer 1: WASM capability isolation (always on).** The program runs as a WebAssembly module inside wasmtime. It can only access what the WASI runtime explicitly grants: preopened directories, network sockets, environment variables. Everything else returns "not found" errors. There is no /etc/passwd, no /proc, no home directory unless you mount one.
 
-**Layer 2: Policy enforcement (recommended).** Every capability grant is evaluated against a deny-by-default policy. The policy engine checks agent identity, intent, tool name, and parameter constraints. Drift detection flags when capabilities diverge from declared intent. All decisions are audit-logged. This layer creates the gap between requesting and receiving a capability -- the gap where security policy lives.
+**Layer 2: Policy enforcement (recommended).** Every capability grant is evaluated against a deny-by-default policy. The policy engine checks agent identity, intent, tool name, and parameter constraints. Drift detection flags when capabilities diverge from declared intent. All decisions are audit-logged. This layer creates the gap between requesting and receiving a capability — the gap where security policy lives.
 
 **Layer 3: Linux namespace isolation (opt-in with --bwrap).** Wraps the entire wasmtime process in a bubblewrap sandbox with unshared namespaces (PID, network, IPC, UTS, cgroup). This is defense in depth against wasmtime runtime bugs.
 
@@ -237,8 +261,14 @@ With policy enabled, even explicitly requested capabilities can be denied by pol
 - No GPU passthrough. Programs that need GPU access should use API calls over the network instead.
 - WASI preview 1 only. Preview 2 (component model) support is planned.
 - No detached/background execution yet.
-- **Critical: Only as secure as WASM; that's a major load-bearing weight.** While WASM is believed to be secure-by-design, AI is
-reminding me that even the Titanic could sink.
+- Policy evaluation happens before execution, not during. Once a capability is granted, it's available for the entire session.
+- **Only as secure as WASM.** While WASM is secure-by-design, codejail's isolation ceiling is wasmtime's. Layer 3 (bubblewrap) exists as defense in depth.
+
+### When to use something else
+
+- **Sandboxing arbitrary executables** (Python scripts, shell commands, native binaries) — codejail runs WASM modules only. See [gVisor](https://gvisor.dev/), [bubblewrap](https://github.com/containers/bubblewrap), or [nsjail](https://github.com/google/nsjail).
+- **Container-level isolation** — codejail is not a container runtime. See [Firecracker](https://firecracker-microvm.github.io/) or [Kata Containers](https://katacontainers.io/).
+- **Runtime per-call policy enforcement at the network layer** — codejail's policy runs before execution. If you need to gate every MCP tool call as it flows through, use [Arbiter](https://github.com/cyrenei/mcp-proxy-firewall).
 
 ## Docker
 

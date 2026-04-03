@@ -13,9 +13,9 @@ mod sandbox;
 #[command(
     name = "codejail",
     version,
-    about = "WASM sandbox with Docker-like commands.\n\n\
-             Run untrusted code with deny-by-default capabilities.\n\
-             Grant filesystem, network, and environment access explicitly."
+    about = "WASM sandbox for AI agent tool execution.\n\n\
+             Run tool implementations with deny-by-default capabilities.\n\
+             Grant filesystem, network, and environment access through policy."
 )]
 struct Cli {
     #[command(subcommand)]
