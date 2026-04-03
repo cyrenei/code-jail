@@ -1,6 +1,6 @@
 # codejail
 
-A WASM sandbox with policy-enforced access control. Run untrusted programs where every capability is deny-by-default and every grant is checked against policy before it takes effect.
+A WASM sandbox with policy-enforced access control. Run untrusted programs (like basically any AI model) where every capability is deny-by-default and every grant is checked against policy before it takes effect.
 
 The sandbox is the cell. The policy engine is the guard. Together they form codejail.
 
