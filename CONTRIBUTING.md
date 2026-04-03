@@ -5,8 +5,8 @@ Thanks for your interest. Here is how to get set up and what we expect from pull
 ## Setup
 
 ```bash
-git clone https://github.com/cyrenei/agent-wasm-containers.git
-cd agent-wasm-containers
+git clone https://github.com/cyrenei/containment.git
+cd containment
 
 # You need Rust stable and the WASM target
 rustup target add wasm32-wasip1

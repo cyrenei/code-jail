@@ -1,18 +1,65 @@
 Installation
 ============
 
-From source
------------
+Quick install (recommended)
+---------------------------
 
-Containment is a Rust project. You need a working Rust toolchain (stable is fine).
+The fastest way to get containment is the install script. It downloads a pre-built binary from GitHub Releases, verifies the SHA256 checksum, and puts it in ``~/.containment/bin/``.
 
 .. code-block:: bash
 
-   $ git clone https://github.com/cyrenei/agent-wasm-containers.git
-   $ cd agent-wasm-containers
+   $ curl -sSf https://raw.githubusercontent.com/cyrenei/containment/main/install.sh | sh
+
+The script detects your OS (Linux, macOS) and architecture (amd64, arm64) automatically.
+
+To pin a specific version or change the install directory:
+
+.. code-block:: bash
+
+   $ CONTAINMENT_VERSION=v0.1.0 curl -sSf \
+       https://raw.githubusercontent.com/cyrenei/containment/main/install.sh | sh
+
+   # Or install somewhere else
+   $ CONTAINMENT_INSTALL_DIR=/usr/local/bin curl -sSf \
+       https://raw.githubusercontent.com/cyrenei/containment/main/install.sh | sh
+
+The script will offer to add ``~/.containment/bin`` to your PATH if it is not there already.
+
+From source (cargo)
+-------------------
+
+If you have the Rust toolchain installed:
+
+.. code-block:: bash
+
+   $ git clone https://github.com/cyrenei/containment.git
+   $ cd containment
    $ cargo install --path .
 
 This puts the ``containment`` binary in ``~/.cargo/bin/``. Make sure that is in your PATH.
+
+Docker
+------
+
+You can run containment in a Docker container without installing anything locally. The image includes bubblewrap and everything needed.
+
+.. code-block:: bash
+
+   $ docker build -t containment .
+   $ docker run --rm containment info
+
+To run WASM modules from a host directory, mount it as a volume:
+
+.. code-block:: bash
+
+   $ docker run --rm -v ./workspace:/data/workspace containment run /data/workspace/program.wasm
+
+For ``--bwrap`` support inside Docker, grant the ``SYS_ADMIN`` capability:
+
+.. code-block:: bash
+
+   $ docker run --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
+       containment run --bwrap program.wasm
 
 WASM compilation target
 -----------------------
@@ -42,29 +89,6 @@ For the ``--bwrap`` flag (defense-in-depth namespace isolation), install bubblew
    $ sudo pacman -S bubblewrap
 
 This is optional. The WASM sandbox works fine without it.
-
-Docker
-------
-
-You can run containment in a Docker container. The image includes bubblewrap and the wasm32-wasip1 target.
-
-.. code-block:: bash
-
-   $ docker build -t containment .
-   $ docker run --rm containment info
-
-To run WASM modules from a host directory, mount it as a volume:
-
-.. code-block:: bash
-
-   $ docker run --rm -v ./workspace:/data/workspace containment run /data/workspace/program.wasm
-
-For ``--bwrap`` support inside Docker, grant the ``SYS_ADMIN`` capability:
-
-.. code-block:: bash
-
-   $ docker run --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
-       containment run --bwrap program.wasm
 
 Verify the install
 ------------------

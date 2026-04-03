@@ -8,13 +8,40 @@ Built on [wasmtime](https://wasmtime.dev/) (WASI preview 1). Written in Rust.
 
 ## Install
 
-```bash
-# From source
-git clone https://github.com/cyrenei/agent-wasm-containers.git
-cd agent-wasm-containers
-cargo install --path .
+The fastest way to install is the one-liner, which downloads a pre-built binary:
 
-# You also need the WASM compilation target for building .rs files
+```bash
+curl -sSf https://raw.githubusercontent.com/cyrenei/containment/main/install.sh | sh
+```
+
+This detects your OS and architecture, downloads the right binary from GitHub Releases, verifies the SHA256 checksum, and drops it into `~/.containment/bin/`.
+
+You can also pin a version or change the install directory:
+
+```bash
+CONTAINMENT_VERSION=v0.1.0 CONTAINMENT_INSTALL_DIR=/usr/local/bin curl -sSf \
+  https://raw.githubusercontent.com/cyrenei/containment/main/install.sh | sh
+```
+
+### Other install methods
+
+**Cargo** (if you already have Rust):
+
+```bash
+git clone https://github.com/cyrenei/containment.git
+cd containment
+cargo install --path .
+```
+
+**Docker** (no install needed):
+
+```bash
+docker run --rm containment info
+```
+
+If you want to build Rust source files into WASM (using `containment build`), you also need the compilation target:
+
+```bash
 rustup target add wasm32-wasip1
 ```
 
@@ -162,8 +189,8 @@ docker compose run --rm containment info
 ## Building from source
 
 ```bash
-git clone https://github.com/cyrenei/agent-wasm-containers.git
-cd agent-wasm-containers
+git clone https://github.com/cyrenei/containment.git
+cd containment
 cargo build --release
 
 # Run tests (requires wasm32-wasip1 target)
@@ -173,7 +200,7 @@ cargo test
 
 ## Documentation
 
-Full documentation is available at the [project docs site](https://cyrenei.github.io/agent-wasm-containers/).
+Full documentation is available at the [project docs site](https://cyrenei.github.io/containment/).
 
 Build locally with:
 
