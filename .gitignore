@@ -1,4 +1,3 @@
 /target
 *.wasm
 docs/_build/
-arbiter-mcp-firewall/

@@ -1,0 +1,3 @@
+[submodule "arbiter-mcp-firewall"]
+	path = arbiter-mcp-firewall
+	url = git@github.com:cyrenei/arbiter-mcp-firewall.git

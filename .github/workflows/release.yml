@@ -31,9 +31,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Clone arbiter-mcp-firewall (path dependency)
-        run: git clone https://github.com/cyrenei/arbiter-mcp-firewall.git arbiter-mcp-firewall
+        with:
+          submodules: true
 
       - uses: dtolnay/rust-toolchain@stable
         with:
