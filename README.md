@@ -237,6 +237,8 @@ With policy enabled, even explicitly requested capabilities can be denied by pol
 - No GPU passthrough. Programs that need GPU access should use API calls over the network instead.
 - WASI preview 1 only. Preview 2 (component model) support is planned.
 - No detached/background execution yet.
+- **Critical: Only as secure as WASM; that's a major load-bearing weight.** While WASM is believed to be secure-by-design, AI is
+reminding me that even the Titanic could sink.
 
 ## Docker
 
