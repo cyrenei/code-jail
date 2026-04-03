@@ -15,6 +15,7 @@ toml = "0.8"
 uuid = { version = "1", features = ["v4", "serde"] }
 wasmtime = "43"
 wasmtime-wasi = "43"
+wat = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 # Policy enforcement crates (from crates.io)
