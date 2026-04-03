@@ -15,12 +15,16 @@
 //!               └─ native binary inherits terminal (PTY passthrough)
 //! ```
 
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use wasmtime::*;
 use wasmtime_wasi::p1::WasiP1Ctx;
 use wasmtime_wasi::WasiCtxBuilder;
+
+use crate::capability::FsMount;
+use crate::landlock;
 
 /// Configuration for native binary execution.
 #[derive(Debug, Clone)]
@@ -35,6 +39,8 @@ pub struct NativeExecConfig {
     pub cwd: Option<PathBuf>,
     /// If true, inherit all env vars from parent instead of env_clear + set.
     pub inherit_env: bool,
+    /// Filesystem mounts — enforced via Landlock in the child process.
+    pub fs_mounts: Vec<FsMount>,
 }
 
 /// Combined state for the WASM store: WASI context + native exec config.
@@ -136,12 +142,35 @@ fn exec_host_function(caller: Caller<'_, NativeBridgeState>) -> i32 {
 
 /// Execute a native binary with the given configuration.
 ///
+/// Filesystem isolation is enforced via Landlock LSM: the child process can
+/// only access paths listed in `config.fs_mounts`. The Landlock ruleset is
+/// prepared in the parent and applied in `pre_exec` (between fork and exec),
+/// so only the child is restricted — the parent remains unrestricted.
+///
 /// The child process inherits the parent's terminal directly, preserving:
 /// - PTY (isatty() returns true in the child)
 /// - Terminal control codes (colors, cursor, etc.)
 /// - Signal delivery (Ctrl+C → SIGINT, etc.)
 /// - Terminal size (SIGWINCH propagation via the kernel)
 fn exec_native(config: &NativeExecConfig) -> anyhow::Result<i32> {
+    // Prepare Landlock ruleset in the parent (opens path fds, creates rules).
+    // The raw fd will be used in pre_exec to apply restrictions to the child.
+    let landlock_mounts: Vec<(&Path, bool)> = config
+        .fs_mounts
+        .iter()
+        .map(|m| (m.host.as_path(), m.writable))
+        .collect();
+
+    let ruleset = landlock::prepare(&landlock_mounts).map_err(|e| {
+        anyhow::anyhow!("landlock: failed to prepare filesystem restrictions: {e}")
+    })?;
+    let ruleset_fd = ruleset.raw_fd();
+
+    eprintln!("[codejail] landlock: enforcing {} fs rules (ABI v{})",
+        config.fs_mounts.len(),
+        landlock::detect_abi().unwrap_or(0),
+    );
+
     let mut cmd = std::process::Command::new(&config.binary_path);
 
     cmd.args(&config.args);
@@ -155,6 +184,13 @@ fn exec_native(config: &NativeExecConfig) -> anyhow::Result<i32> {
 
     if let Some(ref cwd) = config.cwd {
         cmd.current_dir(cwd);
+    }
+
+    // Apply Landlock in the child process (between fork and exec).
+    // Only async-signal-safe functions are called: prctl + syscall.
+    // The ruleset_fd is valid because `ruleset` is alive until after cmd.status().
+    unsafe {
+        cmd.pre_exec(move || landlock::restrict(ruleset_fd));
     }
 
     // Inherit stdio — this is what gives us terminal passthrough.
@@ -171,6 +207,10 @@ fn exec_native(config: &NativeExecConfig) -> anyhow::Result<i32> {
         )
     })?;
 
+    // Keep ruleset alive until the child has exited (path fds must remain
+    // valid through the fork — the kernel copies them to the child).
+    drop(ruleset);
+
     Ok(status.code().unwrap_or(1))
 }
 
@@ -178,87 +218,146 @@ fn exec_native(config: &NativeExecConfig) -> anyhow::Result<i32> {
 mod tests {
     use super::*;
 
+    /// Helper: minimal mounts needed for dynamically-linked binaries.
+    fn base_mounts() -> Vec<FsMount> {
+        ["/bin", "/usr/bin", "/lib", "/lib64", "/usr/lib", "/usr/lib64", "/etc/ld.so.cache"]
+            .iter()
+            .filter(|p| Path::new(p).exists())
+            .map(|p| FsMount {
+                host: PathBuf::from(p),
+                guest: p.to_string(),
+                writable: false,
+            })
+            .collect()
+    }
+
+    fn mounts_with(extra: &[(&str, bool)]) -> Vec<FsMount> {
+        let mut m = base_mounts();
+        for (path, writable) in extra {
+            m.push(FsMount {
+                host: PathBuf::from(path),
+                guest: path.to_string(),
+                writable: *writable,
+            });
+        }
+        m
+    }
+
     #[test]
     fn test_exec_native_true() {
+        if landlock::detect_abi().is_none() {
+            eprintln!("Landlock not available — skipping");
+            return;
+        }
         let config = NativeExecConfig {
             binary_path: PathBuf::from("/bin/true"),
             args: vec![],
             env_vars: vec![],
             cwd: None,
             inherit_env: false,
+            fs_mounts: base_mounts(),
         };
         assert_eq!(exec_native(&config).unwrap(), 0);
     }
 
     #[test]
     fn test_exec_native_false() {
+        if landlock::detect_abi().is_none() {
+            eprintln!("Landlock not available — skipping");
+            return;
+        }
         let config = NativeExecConfig {
             binary_path: PathBuf::from("/bin/false"),
             args: vec![],
             env_vars: vec![],
             cwd: None,
             inherit_env: false,
+            fs_mounts: base_mounts(),
         };
         assert_ne!(exec_native(&config).unwrap(), 0);
     }
 
     #[test]
     fn test_exec_native_with_args() {
+        if landlock::detect_abi().is_none() {
+            eprintln!("Landlock not available — skipping");
+            return;
+        }
         let config = NativeExecConfig {
             binary_path: PathBuf::from("/bin/echo"),
             args: vec!["hello".into(), "world".into()],
             env_vars: vec![],
             cwd: None,
             inherit_env: false,
+            fs_mounts: base_mounts(),
         };
         assert_eq!(exec_native(&config).unwrap(), 0);
     }
 
     #[test]
     fn test_exec_native_missing_binary() {
+        if landlock::detect_abi().is_none() {
+            eprintln!("Landlock not available — skipping");
+            return;
+        }
         let config = NativeExecConfig {
             binary_path: PathBuf::from("/nonexistent/binary/that/does/not/exist"),
             args: vec![],
             env_vars: vec![],
             cwd: None,
             inherit_env: false,
+            fs_mounts: base_mounts(),
         };
         assert!(exec_native(&config).is_err());
     }
 
     #[test]
     fn test_exec_native_with_env() {
-        // /usr/bin/env prints environment; just verify it runs
+        if landlock::detect_abi().is_none() {
+            eprintln!("Landlock not available — skipping");
+            return;
+        }
         let config = NativeExecConfig {
             binary_path: PathBuf::from("/usr/bin/env"),
             args: vec![],
             env_vars: vec![("TEST_VAR".into(), "test_value".into())],
             cwd: None,
             inherit_env: false,
+            fs_mounts: base_mounts(),
         };
         assert_eq!(exec_native(&config).unwrap(), 0);
     }
 
     #[test]
     fn test_exec_native_with_cwd() {
+        if landlock::detect_abi().is_none() {
+            eprintln!("Landlock not available — skipping");
+            return;
+        }
         let config = NativeExecConfig {
             binary_path: PathBuf::from("/bin/pwd"),
             args: vec![],
             env_vars: vec![],
             cwd: Some(PathBuf::from("/tmp")),
             inherit_env: false,
+            fs_mounts: mounts_with(&[("/tmp", false)]),
         };
         assert_eq!(exec_native(&config).unwrap(), 0);
     }
 
     #[test]
     fn test_exec_native_inherit_env() {
+        if landlock::detect_abi().is_none() {
+            eprintln!("Landlock not available — skipping");
+            return;
+        }
         let config = NativeExecConfig {
             binary_path: PathBuf::from("/bin/true"),
             args: vec![],
             env_vars: vec![],
             cwd: None,
             inherit_env: true,
+            fs_mounts: base_mounts(),
         };
         assert_eq!(exec_native(&config).unwrap(), 0);
     }

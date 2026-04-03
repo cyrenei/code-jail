@@ -6,6 +6,7 @@ mod analyzer;
 mod capability;
 mod container;
 mod image;
+mod landlock;
 mod make;
 mod native_bridge;
 mod policy;
@@ -389,6 +390,7 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
             env_vars: resolved.env_vars.clone(),
             cwd: None,
             inherit_env: base_caps.inherit_env,
+            fs_mounts: resolved.fs_mounts.clone(),
         };
 
         match bridge_runtime.run(&wasm_path, native_config, &a.args) {
