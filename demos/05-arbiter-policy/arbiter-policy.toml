@@ -1,0 +1,14 @@
+# Arbiter policy: allow fs_write only when intent matches write/build/deploy.
+# Deny everything else by default.
+
+[[policies]]
+id = "allow-write-on-intent"
+effect = "allow"
+allowed_tools = ["fs_write"]
+
+[policies.intent_match]
+regex = "(?i)\\b(write|build|deploy)\\b"
+
+[[policies]]
+id = "deny-all"
+effect = "deny"
