@@ -436,22 +436,34 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
     if let Some(ref native_binary) = a.native_exec {
         // Native bridge mode: WASM supervisor + native binary execution
 
-        // Determine whether to use bwrap for OS containment
+        // Determine OS containment strategy:
+        //   1. bwrap (namespaces + seccomp) — preferred
+        //   2. direct (Landlock + seccomp) — fallback when bwrap unavailable
+        //   3. --no-sandbox — no containment (explicit opt-in only)
         let sandbox_check = sandbox::check_sandbox_capabilities();
-        let use_bwrap = if a.no_sandbox {
+        let landlock_abi = landlock::detect_abi();
+        let (use_bwrap, landlock_fallback) = if a.no_sandbox {
             eprintln!("[codejail] WARNING: Running without OS containment. Native binary has full host access.");
-            false
+            (false, false)
         } else if sandbox_check.can_sandbox() {
-            true
+            (true, false)
+        } else if landlock_abi.is_some() {
+            // bwrap not available — fall back to Landlock+seccomp (direct mode)
+            eprintln!("[codejail] bwrap unavailable, falling back to direct mode (Landlock+seccomp)");
+            for msg in &sandbox_check.messages {
+                eprintln!("[codejail]   {msg}");
+            }
+            (false, true)
         } else {
-            // bwrap not available and --no-sandbox not passed: fail with actionable error
+            // Neither bwrap nor Landlock available
             eprintln!("[codejail] ERROR: OS containment unavailable for native bridge mode.");
             for msg in &sandbox_check.messages {
                 eprintln!("[codejail]   {msg}");
             }
+            eprintln!("[codejail] Neither bwrap namespaces nor Landlock LSM are available.");
             eprintln!("[codejail] To proceed without containment (UNSAFE), pass --no-sandbox");
             anyhow::bail!(
-                "OS containment (bwrap) required for --native-exec but not available. \
+                "OS containment required for --native-exec but not available. \
                  Pass --no-sandbox to override (not recommended)."
             );
         };
@@ -474,6 +486,9 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
             eprintln!("[codejail] isolation: tier 2 (OS containment + seccomp)");
             eprintln!("[codejail] native binaries run at full ISA capability");
             eprintln!("[codejail] enforcement: bwrap namespaces + seccomp-BPF syscall filter");
+        } else if landlock_fallback {
+            eprintln!("[codejail] isolation: tier 2 (Landlock + seccomp, direct mode)");
+            eprintln!("[codejail] enforcement: Landlock LSM fs restrictions + seccomp-BPF syscall filter");
         } else {
             eprintln!("[codejail] isolation: tier 2b (seccomp only, --no-sandbox)");
             eprintln!("[codejail] enforcement: seccomp-BPF syscall filter (no namespace isolation)");
@@ -482,13 +497,47 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
         eprintln!("[codejail] native bridge mode: {native_binary}");
         let bridge_runtime = native_bridge::NativeBridgeRuntime::new()?;
 
+        // In direct mode (Landlock+seccomp), the binary needs read access to
+        // system directories for dynamic linking. bwrap mode handles this via
+        // bind mounts, but Landlock needs explicit path rules.
+        let mut fs_mounts = resolved.fs_mounts.clone();
+        if !use_bwrap {
+            let native_path = std::path::PathBuf::from(native_binary);
+            let base_paths: Vec<&str> = [
+                "/bin", "/usr/bin", "/lib", "/lib64",
+                "/usr/lib", "/usr/lib64",
+                "/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/ld.so.conf.d",
+            ].iter()
+                .copied()
+                .filter(|p| Path::new(p).exists())
+                .collect();
+
+            for p in base_paths {
+                if !fs_mounts.iter().any(|m| m.host.as_os_str() == p) {
+                    fs_mounts.push(capability::FsMount {
+                        host: std::path::PathBuf::from(p),
+                        guest: p.to_string(),
+                        writable: false,
+                    });
+                }
+            }
+            // The binary itself must be readable
+            if !fs_mounts.iter().any(|m| m.host == native_path) {
+                fs_mounts.push(capability::FsMount {
+                    host: native_path,
+                    guest: native_binary.to_string(),
+                    writable: false,
+                });
+            }
+        }
+
         let native_config = native_bridge::NativeExecConfig {
             binary_path: std::path::PathBuf::from(native_binary),
             args: a.args.clone(),
             env_vars: resolved.env_vars.clone(),
             cwd: None,
             inherit_env: base_caps.inherit_env,
-            fs_mounts: resolved.fs_mounts.clone(),
+            fs_mounts,
             use_bwrap,
             sandbox_caps,
         };

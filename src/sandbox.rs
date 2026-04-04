@@ -68,20 +68,28 @@ pub fn check_sandbox_capabilities() -> SandboxCheck {
 
 /// Try to run a trivial bwrap sandbox to verify it actually works.
 fn check_bwrap_functional(messages: &mut Vec<String>) -> bool {
-    // Minimal bwrap invocation: unshare user+pid, bind /usr, run /bin/true
+    // Minimal bwrap invocation: unshare user+pid, bind /usr, run /bin/true.
+    // Note: we bind /lib64 directly (no --symlink) because on Debian/Ubuntu
+    // the ELF interpreter already lives inside /lib64 as a symlink.
+    // Adding --symlink on top of --ro-bind /lib64 causes bwrap to fail with
+    // "Can't make symlink: existing destination".
+    let mut args = vec![
+        "--unshare-user",
+        "--unshare-pid",
+        "--ro-bind", "/usr", "/usr",
+        "--ro-bind", "/lib", "/lib",
+        "--dev", "/dev",
+        "--proc", "/proc",
+        "--die-with-parent",
+    ];
+    if Path::new("/lib64").exists() {
+        args.extend_from_slice(&["--ro-bind", "/lib64", "/lib64"]);
+    }
+    // Use /usr/bin/true (not /bin/true) because on modern Debian/Ubuntu
+    // /bin is a symlink to /usr/bin, which doesn't exist inside the sandbox.
+    args.extend_from_slice(&["--", "/usr/bin/true"]);
     let result = Command::new("bwrap")
-        .args([
-            "--unshare-user",
-            "--unshare-pid",
-            "--ro-bind", "/usr", "/usr",
-            "--ro-bind", "/lib", "/lib",
-            "--ro-bind", "/lib64", "/lib64",
-            "--symlink", "/usr/lib64/ld-linux-x86-64.so.2", "/lib64/ld-linux-x86-64.so.2",
-            "--dev", "/dev",
-            "--proc", "/proc",
-            "--die-with-parent",
-            "--", "/bin/true",
-        ])
+        .args(&args)
         .output();
 
     match result {
@@ -113,11 +121,28 @@ fn check_user_namespaces(messages: &mut Vec<String>) -> bool {
             messages.push("user namespaces: enabled (procfs)".into());
         } else {
             messages.push("user namespaces: DISABLED in /proc/sys/kernel/unprivileged_userns_clone".into());
+            return false;
         }
-        return enabled;
     }
 
-    // Method 2: attempt unshare -U true
+    // Check AppArmor restriction (Ubuntu 24.04+).
+    // Even when unprivileged_userns_clone=1, AppArmor can block user namespace
+    // creation unless the binary has an AppArmor profile with userns_create.
+    if let Ok(content) = std::fs::read_to_string("/proc/sys/kernel/apparmor_restrict_unprivileged_userns") {
+        let restricted = content.trim() == "1";
+        if restricted {
+            messages.push(
+                "user namespaces: BLOCKED by AppArmor (apparmor_restrict_unprivileged_userns=1)".into()
+            );
+            messages.push(
+                "  fix: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0".into()
+            );
+            // Don't return false yet — let the unshare probe below do the definitive test,
+            // since the binary might have an AppArmor profile that allows it.
+        }
+    }
+
+    // Method 2: attempt unshare -U true (definitive functional test)
     if let Ok(output) = Command::new("unshare").args(["-U", "true"]).output() {
         let available = output.status.success();
         if available {
@@ -190,12 +215,24 @@ pub fn build_bwrap_command(
     for sys_dir in &[
         "/usr",
         "/lib",
-        "/lib64",
         "/etc/alternatives",
         "/etc/ld.so.cache",
     ] {
         if std::path::Path::new(sys_dir).exists() {
             cmd.arg("--ro-bind").arg(sys_dir).arg(sys_dir);
+        }
+    }
+    // Handle merged-usr symlinks (Debian/Ubuntu: /bin→/usr/bin, etc.)
+    for (link, target) in &[
+        ("/bin", "/usr/bin"),
+        ("/sbin", "/usr/sbin"),
+        ("/lib64", "/usr/lib64"),
+    ] {
+        let link_path = std::path::Path::new(link);
+        if link_path.is_symlink() {
+            cmd.arg("--symlink").arg(target).arg(link);
+        } else if link_path.is_dir() {
+            cmd.arg("--ro-bind").arg(link).arg(link);
         }
     }
 
@@ -287,11 +324,13 @@ pub fn build_native_bridge_bwrap_command_with_seccomp(
     cmd.arg("--dev").arg("/dev");
     cmd.arg("--proc").arg("/proc");
 
-    // System directories needed for dynamic linking (read-only)
+    // System directories needed for dynamic linking (read-only).
+    // On merged-usr systems (Debian/Ubuntu), /bin, /sbin, /lib64 are symlinks
+    // into /usr. We bind the real directories and recreate the symlinks so that
+    // paths like /bin/sh and /lib64/ld-linux-x86-64.so.2 resolve correctly.
     for sys_dir in &[
         "/usr",
         "/lib",
-        "/lib64",
         "/etc/alternatives",
         "/etc/ld.so.cache",
         "/etc/ld.so.conf",
@@ -299,6 +338,21 @@ pub fn build_native_bridge_bwrap_command_with_seccomp(
     ] {
         if Path::new(sys_dir).exists() {
             cmd.arg("--ro-bind").arg(sys_dir).arg(sys_dir);
+        }
+    }
+    // Handle merged-usr symlinks: recreate them inside the sandbox
+    for (link, target) in &[
+        ("/bin", "/usr/bin"),
+        ("/sbin", "/usr/sbin"),
+        ("/lib64", "/usr/lib64"),
+    ] {
+        let link_path = Path::new(link);
+        if link_path.is_symlink() {
+            // It's a symlink on the host → recreate as symlink in sandbox
+            cmd.arg("--symlink").arg(target).arg(link);
+        } else if link_path.is_dir() {
+            // Real directory → bind-mount it
+            cmd.arg("--ro-bind").arg(link).arg(link);
         }
     }
 
