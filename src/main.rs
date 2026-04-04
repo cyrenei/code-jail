@@ -288,7 +288,30 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
 
     // Resolve capabilities: either through policy evaluation or self-authorization
     let resolved = if let Some(policy_path) = &policy_path_opt {
-        // Policy mode: evaluate each capability against policy
+        // Policy mode: evaluate each capability against policy.
+        // Merge JailFile capabilities into grants so they go through the policy gate.
+        let mut all_grants = grants.clone();
+        for path in &base_caps.fs_read {
+            all_grants.push(capability::CapGrant::Fs(capability::FsMount {
+                host: std::path::PathBuf::from(path),
+                guest: path.clone(),
+                writable: false,
+            }));
+        }
+        for path in &base_caps.fs_write {
+            all_grants.push(capability::CapGrant::Fs(capability::FsMount {
+                host: std::path::PathBuf::from(path),
+                guest: path.clone(),
+                writable: true,
+            }));
+        }
+        if !base_caps.env.is_empty() {
+            all_grants.push(capability::CapGrant::Env(base_caps.env.clone()));
+        }
+        for rule in &base_caps.net_allow {
+            all_grants.push(capability::CapGrant::Net(rule.clone()));
+        }
+
         eprintln!("[codejail] policy mode: {policy_path}");
         let gate = policy::PolicyGate::load(
             Path::new(policy_path),
@@ -299,7 +322,7 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
         let verdict = rt.block_on(gate.evaluate_caps(
             &a.image,
             &a.intent,
-            &grants,
+            &all_grants,
             &a.volumes,
             &a.env_vars,
             a.net,
