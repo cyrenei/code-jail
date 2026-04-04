@@ -22,6 +22,9 @@ use wasmtime::*;
 use wasmtime_wasi::p1::WasiP1Ctx;
 use wasmtime_wasi::WasiCtxBuilder;
 
+use crate::sandbox;
+use crate::seccomp;
+
 /// Configuration for native binary execution.
 #[derive(Debug, Clone)]
 pub struct NativeExecConfig {
@@ -35,6 +38,11 @@ pub struct NativeExecConfig {
     pub cwd: Option<PathBuf>,
     /// If true, inherit all env vars from parent instead of env_clear + set.
     pub inherit_env: bool,
+    /// If true, wrap execution in bwrap for OS-level containment.
+    /// Default: true (bwrap ON if available).
+    pub use_bwrap: bool,
+    /// Resolved sandbox capabilities for bwrap (fs_read, fs_write, net).
+    pub sandbox_caps: sandbox::NativeSandboxCaps,
 }
 
 /// Combined state for the WASM store: WASI context + native exec config.
@@ -136,12 +144,31 @@ fn exec_host_function(caller: Caller<'_, NativeBridgeState>) -> i32 {
 
 /// Execute a native binary with the given configuration.
 ///
+/// When `use_bwrap` is true and bwrap is available, the binary is wrapped
+/// in OS-level namespace isolation (Tier 2). Otherwise falls back to
+/// direct execution (no OS containment).
+///
 /// The child process inherits the parent's terminal directly, preserving:
 /// - PTY (isatty() returns true in the child)
 /// - Terminal control codes (colors, cursor, etc.)
-/// - Signal delivery (Ctrl+C → SIGINT, etc.)
+/// - Signal delivery (Ctrl+C -> SIGINT, etc.)
 /// - Terminal size (SIGWINCH propagation via the kernel)
 fn exec_native(config: &NativeExecConfig) -> anyhow::Result<i32> {
+    if config.use_bwrap {
+        return exec_native_bwrap(config);
+    }
+
+    exec_native_direct(config)
+}
+
+/// Execute a native binary directly (no OS containment, but with seccomp).
+///
+/// Even without namespace isolation, seccomp-BPF restricts the syscall surface.
+/// The filter is applied in `pre_exec` (after fork, before exec) so it constrains
+/// the new program. PR_SET_NO_NEW_PRIVS ensures the filter persists across exec.
+fn exec_native_direct(config: &NativeExecConfig) -> anyhow::Result<i32> {
+    use std::os::unix::process::CommandExt;
+
     let mut cmd = std::process::Command::new(&config.binary_path);
 
     cmd.args(&config.args);
@@ -164,6 +191,24 @@ fn exec_native(config: &NativeExecConfig) -> anyhow::Result<i32> {
     cmd.stdout(std::process::Stdio::inherit());
     cmd.stderr(std::process::Stdio::inherit());
 
+    // Apply seccomp-BPF filter in pre_exec (after fork, before exec).
+    // The filter persists across exec because PR_SET_NO_NEW_PRIVS is set.
+    // This constrains what syscalls the native binary can make even without
+    // namespace isolation — defense in depth.
+    let seccomp_profile = seccomp::SeccompProfile::from_capabilities(&config.sandbox_caps);
+    eprintln!("[codejail] {}", seccomp_profile.summary());
+
+    // SAFETY: pre_exec runs between fork and exec in the child process.
+    // We only call async-signal-safe operations (prctl) and our BPF
+    // setup uses pre-allocated data. No heap allocation or locks.
+    unsafe {
+        cmd.pre_exec(move || {
+            seccomp_profile.apply().map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+            })
+        });
+    }
+
     let status = cmd.status().map_err(|e| {
         anyhow::anyhow!(
             "failed to execute '{}': {e}",
@@ -174,92 +219,116 @@ fn exec_native(config: &NativeExecConfig) -> anyhow::Result<i32> {
     Ok(status.code().unwrap_or(1))
 }
 
+/// Execute a native binary through bwrap OS containment + seccomp.
+///
+/// The seccomp BPF filter is written to a memfd and passed to bwrap via
+/// `--seccomp FD`. This is cleaner than applying seccomp in pre_exec
+/// inside bwrap, because bwrap manages the process lifecycle.
+///
+/// Defense layers applied:
+/// 1. Linux namespaces (user, pid, ipc, uts, cgroup, optionally net)
+/// 2. Filesystem deny-by-default (only explicitly granted paths visible)
+/// 3. Seccomp-BPF syscall filtering (only needed syscalls allowed)
+fn exec_native_bwrap(config: &NativeExecConfig) -> anyhow::Result<i32> {
+    // Build seccomp filter and write to a memfd for bwrap's --seccomp flag.
+    let seccomp_profile = seccomp::SeccompProfile::from_capabilities(&config.sandbox_caps);
+    eprintln!("[codejail] {}", seccomp_profile.summary());
+
+    let bpf_bytes = seccomp_profile.to_bpf_bytes();
+    let seccomp_fd = seccomp::write_bpf_to_memfd(&bpf_bytes)?;
+
+    // Build the bwrap command with the seccomp fd.
+    // bwrap's --seccomp flag reads the BPF program from the fd and applies it
+    // after namespace setup but before exec'ing the child binary.
+    let mut cmd = sandbox::build_native_bridge_bwrap_command_with_seccomp(
+        &config.binary_path,
+        &config.args,
+        &config.sandbox_caps,
+        &config.env_vars,
+        config.inherit_env,
+        Some(seccomp_fd),
+    );
+
+    if let Some(ref cwd) = config.cwd {
+        cmd.current_dir(cwd);
+    }
+
+    let status = cmd.status().map_err(|e| {
+        // Clean up the memfd on error
+        unsafe { libc::close(seccomp_fd); }
+        anyhow::anyhow!(
+            "bwrap exec failed for '{}': {e}",
+            config.binary_path.display()
+        )
+    })?;
+
+    // The memfd is consumed by bwrap; close our copy
+    unsafe { libc::close(seccomp_fd); }
+
+    Ok(status.code().unwrap_or(1))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_exec_native_true() {
-        let config = NativeExecConfig {
-            binary_path: PathBuf::from("/bin/true"),
+    /// Helper to create a minimal NativeExecConfig for testing direct execution.
+    fn test_config(binary: &str) -> NativeExecConfig {
+        NativeExecConfig {
+            binary_path: PathBuf::from(binary),
             args: vec![],
             env_vars: vec![],
             cwd: None,
             inherit_env: false,
-        };
+            // Tests run without bwrap by default (direct execution)
+            use_bwrap: false,
+            sandbox_caps: sandbox::NativeSandboxCaps::default(),
+        }
+    }
+
+    #[test]
+    fn test_exec_native_true() {
+        let config = test_config("/bin/true");
         assert_eq!(exec_native(&config).unwrap(), 0);
     }
 
     #[test]
     fn test_exec_native_false() {
-        let config = NativeExecConfig {
-            binary_path: PathBuf::from("/bin/false"),
-            args: vec![],
-            env_vars: vec![],
-            cwd: None,
-            inherit_env: false,
-        };
+        let config = test_config("/bin/false");
         assert_ne!(exec_native(&config).unwrap(), 0);
     }
 
     #[test]
     fn test_exec_native_with_args() {
-        let config = NativeExecConfig {
-            binary_path: PathBuf::from("/bin/echo"),
-            args: vec!["hello".into(), "world".into()],
-            env_vars: vec![],
-            cwd: None,
-            inherit_env: false,
-        };
+        let mut config = test_config("/bin/echo");
+        config.args = vec!["hello".into(), "world".into()];
         assert_eq!(exec_native(&config).unwrap(), 0);
     }
 
     #[test]
     fn test_exec_native_missing_binary() {
-        let config = NativeExecConfig {
-            binary_path: PathBuf::from("/nonexistent/binary/that/does/not/exist"),
-            args: vec![],
-            env_vars: vec![],
-            cwd: None,
-            inherit_env: false,
-        };
+        let config = test_config("/nonexistent/binary/that/does/not/exist");
         assert!(exec_native(&config).is_err());
     }
 
     #[test]
     fn test_exec_native_with_env() {
-        // /usr/bin/env prints environment; just verify it runs
-        let config = NativeExecConfig {
-            binary_path: PathBuf::from("/usr/bin/env"),
-            args: vec![],
-            env_vars: vec![("TEST_VAR".into(), "test_value".into())],
-            cwd: None,
-            inherit_env: false,
-        };
+        let mut config = test_config("/usr/bin/env");
+        config.env_vars = vec![("TEST_VAR".into(), "test_value".into())];
         assert_eq!(exec_native(&config).unwrap(), 0);
     }
 
     #[test]
     fn test_exec_native_with_cwd() {
-        let config = NativeExecConfig {
-            binary_path: PathBuf::from("/bin/pwd"),
-            args: vec![],
-            env_vars: vec![],
-            cwd: Some(PathBuf::from("/tmp")),
-            inherit_env: false,
-        };
+        let mut config = test_config("/bin/pwd");
+        config.cwd = Some(PathBuf::from("/tmp"));
         assert_eq!(exec_native(&config).unwrap(), 0);
     }
 
     #[test]
     fn test_exec_native_inherit_env() {
-        let config = NativeExecConfig {
-            binary_path: PathBuf::from("/bin/true"),
-            args: vec![],
-            env_vars: vec![],
-            cwd: None,
-            inherit_env: true,
-        };
+        let mut config = test_config("/bin/true");
+        config.inherit_env = true;
         assert_eq!(exec_native(&config).unwrap(), 0);
     }
 

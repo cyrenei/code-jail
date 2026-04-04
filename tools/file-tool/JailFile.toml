@@ -1,0 +1,15 @@
+[sandbox]
+name = "file-tool"
+entrypoint = "file_tool.wasm"
+
+[capabilities]
+fs_read = ["/workspace"]
+fs_write = ["/workspace/output"]
+net_allow = []
+env = []
+inherit_env = false
+
+[limits]
+memory_mb = 64
+fuel = 100_000_000
+wall_time_secs = 30

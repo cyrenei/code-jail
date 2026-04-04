@@ -8,6 +8,7 @@ license = "Apache-2.0"
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
+libc = "0.2"
 nix = { version = "0.30", features = ["sched", "signal", "user", "mount", "process"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
