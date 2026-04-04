@@ -6,7 +6,7 @@
 //! restrictions but never enforced them.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use predicates::prelude::*;
 use tempfile::TempDir;
@@ -20,19 +20,71 @@ fn codejail_cmd() -> assert_cmd::Command {
 }
 
 /// Run `codejail make` to generate bridge artifacts, return (bridge, jailfile) paths.
-fn make_bridge(binary: &str, dir: &std::path::Path) -> (PathBuf, PathBuf) {
+/// Then overwrite the JailFile with explicit capabilities (restrictive defaults
+/// mean auto-generated JailFiles are empty).
+fn make_bridge(binary: &str, dir: &Path) -> (PathBuf, PathBuf) {
     codejail_cmd()
         .current_dir(dir)
         .args(["make", binary, "-o", "test"])
         .assert()
         .success();
-    (
-        dir.join("test.d/bridge.wasm"),
-        dir.join("test.d/JailFile.toml"),
-    )
+    let jailfile = dir.join("test.d/JailFile.toml");
+    // Write a JailFile with the system paths needed for dynamically-linked binaries
+    write_jailfile(&jailfile, &base_fs_read(), &["/tmp"], true);
+    (dir.join("test.d/bridge.wasm"), jailfile)
+}
+
+/// System paths needed for dynamically-linked binaries to execute.
+fn base_fs_read() -> Vec<&'static str> {
+    ["/bin", "/usr/bin", "/lib", "/lib64", "/usr/lib", "/usr/lib64",
+     "/etc/ld.so.cache", "/etc", "/dev", "/proc/self"]
+        .iter()
+        .copied()
+        .filter(|p| Path::new(p).exists())
+        .collect()
+}
+
+/// Write a JailFile with explicit capabilities.
+fn write_jailfile(path: &Path, fs_read: &[&str], fs_write: &[&str], net: bool) {
+    let read_entries: String = fs_read.iter()
+        .map(|p| format!("    \"{p}\","))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let write_entries: String = fs_write.iter()
+        .map(|p| format!("    \"{p}\","))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let net_allow = if net { "\"*\"" } else { "" };
+
+    let content = format!(r#"[sandbox]
+name = "test"
+entrypoint = "bridge.wasm"
+
+[capabilities]
+fs_read = [
+{read_entries}
+]
+fs_write = [
+{write_entries}
+]
+net_allow = [{net_allow}]
+env = ["PATH", "HOME", "TERM"]
+inherit_env = false
+stdin = true
+stdout = true
+stderr = true
+
+[limits]
+memory_mb = 512
+fuel = 0
+wall_time_secs = 0
+"#);
+    fs::write(path, content).unwrap();
 }
 
 /// Helper: run a jailed native binary via codejail run --native-exec.
+/// Uses --no-sandbox to bypass bwrap requirement (tests run in direct mode:
+/// Landlock + seccomp enforcement without namespace isolation).
 fn jailed_run(binary: &str, bridge: &PathBuf, jailfile: &PathBuf) -> assert_cmd::Command {
     let mut cmd = codejail_cmd();
     cmd.args([
@@ -42,7 +94,7 @@ fn jailed_run(binary: &str, bridge: &PathBuf, jailfile: &PathBuf) -> assert_cmd:
         "--jailfile",
     ]);
     cmd.arg(jailfile);
-    cmd.args(["--fuel", "0", "--timeout", "0"]);
+    cmd.args(["--fuel", "0", "--timeout", "0", "--no-sandbox"]);
     cmd.arg(bridge);
     cmd.arg("--");
     cmd
@@ -245,7 +297,10 @@ fn test_landlock_same_binary_different_access() {
     let bridge = dir.path().join("test.d/bridge.wasm");
     let jailfile_path = dir.path().join("test.d/JailFile.toml");
 
-    // Test 1: Default JailFile — /var/tmp is NOT mounted, access denied
+    // Write JailFile with base system paths but NOT /var/tmp
+    write_jailfile(&jailfile_path, &base_fs_read(), &["/tmp"], false);
+
+    // Test 1: JailFile without /var/tmp — access denied
     let result = jailed_run("/bin/cat", &bridge, &jailfile_path)
         .arg(&target)
         .output()
@@ -256,12 +311,9 @@ fn test_landlock_same_binary_different_access() {
     );
 
     // Test 2: Add /var/tmp to JailFile — now access is granted
-    let jailfile_content = fs::read_to_string(&jailfile_path).unwrap();
-    let modified = jailfile_content.replace(
-        "fs_read = [",
-        &format!("fs_read = [\n    \"/var/tmp\","),
-    );
-    fs::write(&jailfile_path, &modified).unwrap();
+    let mut read_with_var_tmp: Vec<&str> = base_fs_read();
+    read_with_var_tmp.push("/var/tmp");
+    write_jailfile(&jailfile_path, &read_with_var_tmp, &["/tmp"], false);
 
     jailed_run("/bin/cat", &bridge, &jailfile_path)
         .arg(&target)

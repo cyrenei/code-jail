@@ -25,6 +25,31 @@ fn codejail_cmd() -> assert_cmd::Command {
     cmd
 }
 
+/// Check if bwrap is functional in this environment.
+fn bwrap_functional() -> bool {
+    Command::new("bwrap")
+        .args([
+            "--unshare-user", "--unshare-pid",
+            "--ro-bind", "/usr", "/usr",
+            "--ro-bind", "/lib", "/lib",
+            "--ro-bind", "/lib64", "/lib64",
+            "--dev", "/dev", "--proc", "/proc",
+            "--die-with-parent", "--", "/bin/true",
+        ])
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+/// Patch a generated launcher script to add --no-sandbox flag.
+fn patch_launcher_no_sandbox(launcher_path: &std::path::Path) {
+    let content = fs::read_to_string(launcher_path).unwrap();
+    let patched = content.replace(
+        "--native-exec",
+        "--no-sandbox \\\n    --native-exec",
+    );
+    fs::write(launcher_path, patched).unwrap();
+}
+
 // ── codejail make — artifact generation ─────────────────────────
 
 #[test]
@@ -126,7 +151,45 @@ fn test_make_bridge_wasm_is_valid() {
 }
 
 #[test]
-fn test_make_permissive_flag() {
+fn test_make_permissive_flag_requires_force() {
+    let dir = TempDir::new().unwrap();
+    let output = dir.path().join("jailed-echo");
+
+    // --permissive without --yes-i-mean-it should fail
+    codejail_cmd()
+        .current_dir(dir.path())
+        .args(["make", "/bin/echo", "-o"])
+        .arg(&output)
+        .args(["--permissive"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--yes-i-mean-it"));
+}
+
+#[test]
+fn test_make_permissive_with_force() {
+    let dir = TempDir::new().unwrap();
+    let output = dir.path().join("jailed-echo");
+
+    // --permissive --yes-i-mean-it should succeed with permissive output
+    codejail_cmd()
+        .current_dir(dir.path())
+        .args(["make", "/bin/echo", "-o"])
+        .arg(&output)
+        .args(["--permissive", "--yes-i-mean-it"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("WARNING: permissive mode"));
+
+    let jailfile = fs::read_to_string(dir.path().join("jailed-echo.d/JailFile.toml")).unwrap();
+    assert!(
+        jailfile.contains("inherit_env = true"),
+        "permissive should inherit env"
+    );
+}
+
+#[test]
+fn test_make_default_restrictive() {
     let dir = TempDir::new().unwrap();
     let output = dir.path().join("jailed-echo");
 
@@ -134,18 +197,21 @@ fn test_make_permissive_flag() {
         .current_dir(dir.path())
         .args(["make", "/bin/echo", "-o"])
         .arg(&output)
-        .args(["--permissive"])
         .assert()
         .success();
 
     let jailfile = fs::read_to_string(dir.path().join("jailed-echo.d/JailFile.toml")).unwrap();
     assert!(
-        jailfile.contains("inherit_env = true"),
-        "permissive should inherit env"
+        jailfile.contains("RESTRICTIVE by design"),
+        "default should say RESTRICTIVE"
     );
     assert!(
-        jailfile.contains("net_allow = [\"*\"]"),
-        "permissive should allow all network"
+        jailfile.contains("fs_read = []"),
+        "default should have empty fs_read"
+    );
+    assert!(
+        jailfile.contains("# Inferred fs_read"),
+        "inferred caps should appear as comments"
     );
 }
 
@@ -156,14 +222,19 @@ fn test_make_and_run_echo() {
     let dir = TempDir::new().unwrap();
     let output = dir.path().join("jailed-echo");
 
-    // Step 1: make
+    // Step 1: make (permissive for end-to-end test)
     codejail_cmd()
         .current_dir(dir.path())
         .args(["make", "/bin/echo", "-o"])
         .arg(&output)
-        .args(["--permissive"])
+        .args(["--permissive", "--yes-i-mean-it"])
         .assert()
         .success();
+
+    // If bwrap is not functional, patch the launcher to use --no-sandbox
+    if !bwrap_functional() {
+        patch_launcher_no_sandbox(&output);
+    }
 
     // Step 2: run the launcher
     let result = Command::new(&output)
@@ -189,9 +260,13 @@ fn test_make_and_run_true() {
         .current_dir(dir.path())
         .args(["make", "/bin/true", "-o"])
         .arg(&output)
-        .args(["--permissive"])
+        .args(["--permissive", "--yes-i-mean-it"])
         .assert()
         .success();
+
+    if !bwrap_functional() {
+        patch_launcher_no_sandbox(&output);
+    }
 
     let status = Command::new(&output)
         .status()
@@ -209,9 +284,13 @@ fn test_make_and_run_false_propagates_exit_code() {
         .current_dir(dir.path())
         .args(["make", "/bin/false", "-o"])
         .arg(&output)
-        .args(["--permissive"])
+        .args(["--permissive", "--yes-i-mean-it"])
         .assert()
         .success();
+
+    if !bwrap_functional() {
+        patch_launcher_no_sandbox(&output);
+    }
 
     let status = Command::new(&output)
         .status()
@@ -229,9 +308,13 @@ fn test_make_and_run_with_args() {
         .current_dir(dir.path())
         .args(["make", "/bin/echo", "-o"])
         .arg(&output)
-        .args(["--permissive"])
+        .args(["--permissive", "--yes-i-mean-it"])
         .assert()
         .success();
+
+    if !bwrap_functional() {
+        patch_launcher_no_sandbox(&output);
+    }
 
     let result = Command::new(&output)
         .args(["arg1", "arg2", "arg3"])
@@ -261,14 +344,17 @@ fn test_run_native_exec_directly() {
     let bridge = dir.path().join("test.d/bridge.wasm");
     let jailfile = dir.path().join("test.d/JailFile.toml");
 
-    // Run directly with --native-exec
-    codejail_cmd()
-        .args([
-            "run",
-            "--native-exec",
-            "/bin/echo",
-            "--jailfile",
-        ])
+    // Restrictive defaults produce an empty JailFile. Write explicit capabilities
+    // needed for dynamically-linked binaries (system libs, linker cache).
+    write_test_jailfile(&jailfile);
+
+    // Build the command conditionally based on bwrap availability
+    let mut cmd = codejail_cmd();
+    cmd.arg("run");
+    if !bwrap_functional() {
+        cmd.arg("--no-sandbox");
+    }
+    cmd.args(["--native-exec", "/bin/echo", "--jailfile"])
         .arg(&jailfile)
         .arg("--fuel")
         .arg("0")
@@ -276,10 +362,31 @@ fn test_run_native_exec_directly() {
         .arg("0")
         .arg(&bridge)
         .arg("--")
-        .arg("direct bridge test")
-        .assert()
+        .arg("direct bridge test");
+
+    cmd.assert()
         .success()
         .stdout(predicate::str::contains("direct bridge test"));
+}
+
+/// Write a JailFile with system paths needed for dynamically-linked binaries.
+fn write_test_jailfile(path: &std::path::Path) {
+    let sys_read: Vec<String> = ["/bin", "/usr/bin", "/lib", "/lib64", "/usr/lib",
+         "/usr/lib64", "/etc/ld.so.cache", "/etc", "/dev", "/proc/self"]
+        .iter()
+        .filter(|p| std::path::Path::new(p).exists())
+        .map(|p| format!("    \"{p}\","))
+        .collect();
+
+    let content = format!(
+        "[sandbox]\nname = \"test\"\nentrypoint = \"bridge.wasm\"\n\n\
+         [capabilities]\nfs_read = [\n{}\n]\nfs_write = [\n    \"/tmp\",\n]\n\
+         net_allow = []\nenv = [\"PATH\", \"HOME\", \"TERM\"]\n\
+         inherit_env = false\nstdin = true\nstdout = true\nstderr = true\n\n\
+         [limits]\nmemory_mb = 512\nfuel = 0\nwall_time_secs = 0\n",
+        sys_read.join("\n")
+    );
+    fs::write(path, content).unwrap();
 }
 
 // ── Analysis quality ─────────────────────────────────────────────

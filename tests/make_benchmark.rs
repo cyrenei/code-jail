@@ -2,7 +2,7 @@
 //!
 //! Measures:
 //! - make command execution time (artifact generation)
-//! - Bridge overhead (WASM → native exec latency)
+//! - Bridge overhead (WASM -> native exec latency)
 //! - Launcher startup time vs direct execution
 
 use std::fs;
@@ -13,6 +13,33 @@ use tempfile::TempDir;
 
 fn codejail_bin() -> std::path::PathBuf {
     assert_cmd::cargo::cargo_bin("codejail")
+}
+
+/// Check if bwrap is functional in this environment.
+/// If not, benchmark tests that run launchers should be skipped.
+fn bwrap_functional() -> bool {
+    Command::new("bwrap")
+        .args([
+            "--unshare-user", "--unshare-pid",
+            "--ro-bind", "/usr", "/usr",
+            "--ro-bind", "/lib", "/lib",
+            "--ro-bind", "/lib64", "/lib64",
+            "--dev", "/dev", "--proc", "/proc",
+            "--die-with-parent", "--", "/bin/true",
+        ])
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+/// Patch a generated launcher script to add --no-sandbox flag.
+/// Used when bwrap is not functional in the test environment.
+fn patch_launcher_no_sandbox(launcher_path: &std::path::Path) {
+    let content = fs::read_to_string(launcher_path).unwrap();
+    let patched = content.replace(
+        "--native-exec",
+        "--no-sandbox \\\n    --native-exec",
+    );
+    fs::write(launcher_path, patched).unwrap();
 }
 
 fn mean_and_stddev(samples: &[f64]) -> (f64, f64) {
@@ -73,7 +100,7 @@ fn bench_bridge_overhead() {
     // Setup: generate the artifacts
     let status = Command::new(codejail_bin())
         .current_dir(dir.path())
-        .args(["make", "/bin/true", "-o", "bench-true", "--permissive"])
+        .args(["make", "/bin/true", "-o", "bench-true", "--permissive", "--yes-i-mean-it"])
         .env(
             "CODEJAIL_HOME",
             std::env::temp_dir().join("codejail-bench-overhead"),
@@ -83,6 +110,11 @@ fn bench_bridge_overhead() {
     assert!(status.status.success());
 
     let launcher = dir.path().join("bench-true");
+
+    // If bwrap is not functional, patch the launcher to use --no-sandbox
+    if !bwrap_functional() {
+        patch_launcher_no_sandbox(&launcher);
+    }
 
     // Measure bridge overhead: time to run /bin/true through the bridge
     let mut bridge_times = Vec::new();
@@ -140,7 +172,7 @@ fn bench_arg_passing() {
 
     let status = Command::new(codejail_bin())
         .current_dir(dir.path())
-        .args(["make", "/bin/echo", "-o", "bench-echo", "--permissive"])
+        .args(["make", "/bin/echo", "-o", "bench-echo", "--permissive", "--yes-i-mean-it"])
         .env(
             "CODEJAIL_HOME",
             std::env::temp_dir().join("codejail-bench-args"),
@@ -150,6 +182,11 @@ fn bench_arg_passing() {
     assert!(status.status.success());
 
     let launcher = dir.path().join("bench-echo");
+
+    // If bwrap is not functional, patch the launcher to use --no-sandbox
+    if !bwrap_functional() {
+        patch_launcher_no_sandbox(&launcher);
+    }
 
     // Run with varying argument counts
     for arg_count in [0, 1, 10, 100] {
