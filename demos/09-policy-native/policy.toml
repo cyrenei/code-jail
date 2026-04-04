@@ -1,0 +1,39 @@
+# Policy for Claude Code native bridge sandbox.
+#
+# Layer 1: Arbiter policy gate (this file)
+#   Evaluates capability grants BEFORE they reach the runtime.
+#   Denied capabilities are stripped — Landlock never even sees them.
+#
+# Layer 2: Landlock kernel enforcement
+#   Capabilities that pass policy are enforced at the kernel level.
+#
+# This policy allows fs_write only when the declared intent indicates
+# active development. Read-only intents (review, audit, read) are
+# denied write access — Claude Code can read the project but not
+# modify it.
+
+# Rule 1: Always allow filesystem reads (system libs, project files)
+[[policies]]
+id = "allow-fs-read"
+effect = "allow"
+allowed_tools = ["fs_read"]
+
+# Rule 2: Always allow env reads (HOME, PATH, TERM, etc.)
+[[policies]]
+id = "allow-env"
+effect = "allow"
+allowed_tools = ["env_read"]
+
+# Rule 3: Allow fs_write ONLY when intent matches development verbs
+[[policies]]
+id = "allow-write-on-dev-intent"
+effect = "allow"
+allowed_tools = ["fs_write"]
+
+[policies.intent_match]
+regex = "(?i)\\b(write|build|deploy|develop|implement|fix|create|refactor)\\b"
+
+# Rule 4: Deny everything else (deny-by-default)
+[[policies]]
+id = "deny-all"
+effect = "deny"

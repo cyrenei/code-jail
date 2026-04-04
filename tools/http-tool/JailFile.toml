@@ -1,0 +1,15 @@
+[sandbox]
+name = "http-tool"
+entrypoint = "http_tool.wasm"
+
+[capabilities]
+fs_read = []
+fs_write = []
+net_allow = ["api.example.com:443", "api.example.com:80"]
+env = ["API_KEY"]
+inherit_env = false
+
+[limits]
+memory_mb = 128
+fuel = 500_000_000
+wall_time_secs = 60

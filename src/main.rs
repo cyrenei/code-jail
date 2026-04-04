@@ -6,11 +6,13 @@ mod analyzer;
 mod capability;
 mod container;
 mod image;
+mod landlock;
 mod make;
 mod native_bridge;
 mod policy;
 mod runtime;
 mod sandbox;
+mod seccomp;
 
 #[derive(Parser)]
 #[command(
@@ -89,6 +91,11 @@ enum Commands {
         #[arg(long)]
         native_exec: Option<String>,
 
+        /// Disable OS-level sandbox for native-exec mode.
+        /// The native binary will run with full host access.
+        #[arg(long)]
+        no_sandbox: bool,
+
         /// Arguments passed to the WASM module (or native binary in bridge mode)
         #[arg(last = true)]
         args: Vec<String>,
@@ -107,9 +114,14 @@ enum Commands {
         #[arg(long)]
         analyze_only: bool,
 
-        /// Generate permissive capabilities (inherit all env, allow all network)
+        /// Generate permissive capabilities (inherit all env, allow all network).
+        /// REQUIRES --yes-i-mean-it or the flag is rejected.
         #[arg(long)]
         permissive: bool,
+
+        /// Confirm dangerous operations (required companion for --permissive)
+        #[arg(long)]
+        yes_i_mean_it: bool,
     },
 
     /// List containers
@@ -191,6 +203,7 @@ fn main() -> anyhow::Result<()> {
             intent,
             audit_log,
             native_exec,
+            no_sandbox,
             args,
         } => cmd_run(RunArgs {
             image,
@@ -208,6 +221,7 @@ fn main() -> anyhow::Result<()> {
             intent,
             audit_log,
             native_exec,
+            no_sandbox,
             args,
         }),
         Commands::Make {
@@ -215,12 +229,29 @@ fn main() -> anyhow::Result<()> {
             output,
             analyze_only,
             permissive,
+            yes_i_mean_it,
         } => {
+            // --permissive without --yes-i-mean-it is rejected
+            if permissive && !yes_i_mean_it {
+                eprintln!("[codejail make] ERROR: --permissive requires --yes-i-mean-it");
+                eprintln!("[codejail make] Permissive mode auto-applies inferred capabilities,");
+                eprintln!("[codejail make] which may grant excessive access to the native binary.");
+                eprintln!("[codejail make] If you understand the risk, re-run with:");
+                eprintln!("[codejail make]   codejail make --permissive --yes-i-mean-it <binary>");
+                anyhow::bail!("--permissive requires --yes-i-mean-it confirmation flag");
+            }
+            if permissive && yes_i_mean_it {
+                eprintln!("[codejail make] WARNING: permissive mode activated");
+                eprintln!("[codejail make] Inferred capabilities will be written as ACTIVE config.");
+                eprintln!("[codejail make] The generated JailFile will grant broad access.");
+                eprintln!("[codejail make] Review and tighten before any production use.");
+            }
             let config = make::MakeConfig {
                 binary_path: std::path::PathBuf::from(binary),
                 output_name: output,
                 analyze_only,
                 permissive,
+                force_permissive: yes_i_mean_it,
             };
             make::cmd_make(config)?;
             Ok(())
@@ -254,6 +285,7 @@ struct RunArgs {
     intent: String,
     audit_log: Option<String>,
     native_exec: Option<String>,
+    no_sandbox: bool,
     args: Vec<String>,
 }
 
@@ -287,7 +319,30 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
 
     // Resolve capabilities: either through policy evaluation or self-authorization
     let resolved = if let Some(policy_path) = &policy_path_opt {
-        // Policy mode: evaluate each capability against policy
+        // Policy mode: evaluate each capability against policy.
+        // Merge JailFile capabilities into grants so they go through the policy gate.
+        let mut all_grants = grants.clone();
+        for path in &base_caps.fs_read {
+            all_grants.push(capability::CapGrant::Fs(capability::FsMount {
+                host: std::path::PathBuf::from(path),
+                guest: path.clone(),
+                writable: false,
+            }));
+        }
+        for path in &base_caps.fs_write {
+            all_grants.push(capability::CapGrant::Fs(capability::FsMount {
+                host: std::path::PathBuf::from(path),
+                guest: path.clone(),
+                writable: true,
+            }));
+        }
+        if !base_caps.env.is_empty() {
+            all_grants.push(capability::CapGrant::Env(base_caps.env.clone()));
+        }
+        for rule in &base_caps.net_allow {
+            all_grants.push(capability::CapGrant::Net(rule.clone()));
+        }
+
         eprintln!("[codejail] policy mode: {policy_path}");
         let gate = policy::PolicyGate::load(
             Path::new(policy_path),
@@ -298,7 +353,7 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
         let verdict = rt.block_on(gate.evaluate_caps(
             &a.image,
             &a.intent,
-            &grants,
+            &all_grants,
             &a.volumes,
             &a.env_vars,
             a.net,
@@ -380,8 +435,101 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
     // Run — either native bridge mode or standard WASM mode
     if let Some(ref native_binary) = a.native_exec {
         // Native bridge mode: WASM supervisor + native binary execution
+
+        // Determine OS containment strategy:
+        //   1. bwrap (namespaces + seccomp) — preferred
+        //   2. direct (Landlock + seccomp) — fallback when bwrap unavailable
+        //   3. --no-sandbox — no containment (explicit opt-in only)
+        let sandbox_check = sandbox::check_sandbox_capabilities();
+        let landlock_abi = landlock::detect_abi();
+        let (use_bwrap, landlock_fallback) = if a.no_sandbox {
+            eprintln!("[codejail] WARNING: Running without OS containment. Native binary has full host access.");
+            (false, false)
+        } else if sandbox_check.can_sandbox() {
+            (true, false)
+        } else if landlock_abi.is_some() {
+            // bwrap not available — fall back to Landlock+seccomp (direct mode)
+            eprintln!("[codejail] bwrap unavailable, falling back to direct mode (Landlock+seccomp)");
+            for msg in &sandbox_check.messages {
+                eprintln!("[codejail]   {msg}");
+            }
+            (false, true)
+        } else {
+            // Neither bwrap nor Landlock available
+            eprintln!("[codejail] ERROR: OS containment unavailable for native bridge mode.");
+            for msg in &sandbox_check.messages {
+                eprintln!("[codejail]   {msg}");
+            }
+            eprintln!("[codejail] Neither bwrap namespaces nor Landlock LSM are available.");
+            eprintln!("[codejail] To proceed without containment (UNSAFE), pass --no-sandbox");
+            anyhow::bail!(
+                "OS containment required for --native-exec but not available. \
+                 Pass --no-sandbox to override (not recommended)."
+            );
+        };
+
+        // Build sandbox capabilities from resolved JailFile capabilities
+        let sandbox_caps = sandbox::NativeSandboxCaps {
+            fs_read: resolved.fs_mounts.iter()
+                .filter(|m| !m.writable)
+                .map(|m| m.host.to_string_lossy().to_string())
+                .collect(),
+            fs_write: resolved.fs_mounts.iter()
+                .filter(|m| m.writable)
+                .map(|m| m.host.to_string_lossy().to_string())
+                .collect(),
+            allow_network: !resolved.net_rules.is_empty(),
+        };
+
+        // Print isolation tier
+        if use_bwrap {
+            eprintln!("[codejail] isolation: tier 2 (OS containment + seccomp)");
+            eprintln!("[codejail] native binaries run at full ISA capability");
+            eprintln!("[codejail] enforcement: bwrap namespaces + seccomp-BPF syscall filter");
+        } else if landlock_fallback {
+            eprintln!("[codejail] isolation: tier 2 (Landlock + seccomp, direct mode)");
+            eprintln!("[codejail] enforcement: Landlock LSM fs restrictions + seccomp-BPF syscall filter");
+        } else {
+            eprintln!("[codejail] isolation: tier 2b (seccomp only, --no-sandbox)");
+            eprintln!("[codejail] enforcement: seccomp-BPF syscall filter (no namespace isolation)");
+        }
+
         eprintln!("[codejail] native bridge mode: {native_binary}");
         let bridge_runtime = native_bridge::NativeBridgeRuntime::new()?;
+
+        // In direct mode (Landlock+seccomp), the binary needs read access to
+        // system directories for dynamic linking. bwrap mode handles this via
+        // bind mounts, but Landlock needs explicit path rules.
+        let mut fs_mounts = resolved.fs_mounts.clone();
+        if !use_bwrap {
+            let native_path = std::path::PathBuf::from(native_binary);
+            let base_paths: Vec<&str> = [
+                "/bin", "/usr/bin", "/lib", "/lib64",
+                "/usr/lib", "/usr/lib64",
+                "/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/ld.so.conf.d",
+            ].iter()
+                .copied()
+                .filter(|p| Path::new(p).exists())
+                .collect();
+
+            for p in base_paths {
+                if !fs_mounts.iter().any(|m| m.host.as_os_str() == p) {
+                    fs_mounts.push(capability::FsMount {
+                        host: std::path::PathBuf::from(p),
+                        guest: p.to_string(),
+                        writable: false,
+                    });
+                }
+            }
+            // The binary itself must be readable
+            if !fs_mounts.iter().any(|m| m.host == native_path) {
+                fs_mounts.push(capability::FsMount {
+                    host: native_path,
+                    guest: native_binary.to_string(),
+                    writable: false,
+                });
+            }
+        }
 
         let native_config = native_bridge::NativeExecConfig {
             binary_path: std::path::PathBuf::from(native_binary),
@@ -389,6 +537,9 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
             env_vars: resolved.env_vars.clone(),
             cwd: None,
             inherit_env: base_caps.inherit_env,
+            fs_mounts,
+            use_bwrap,
+            sandbox_caps,
         };
 
         match bridge_runtime.run(&wasm_path, native_config, &a.args) {
@@ -407,6 +558,8 @@ fn cmd_run(a: RunArgs) -> anyhow::Result<()> {
         }
     } else {
         // Standard WASM mode
+        eprintln!("[codejail] isolation: tier 1 (WASM sandbox)");
+
         let rt = runtime::SandboxRuntime::new(limits.fuel.is_some())?;
         match rt.run(&wasm_path, &resolved, &limits, &a.args) {
             Ok(()) => {
@@ -616,14 +769,12 @@ fn cmd_info() -> anyhow::Result<()> {
     println!("Runtime:     wasmtime 43");
     println!("WASI:        preview 1 (wasm32-wasip1)");
     println!("Data dir:    {}", container::codejail_home().display());
-    println!(
-        "Bubblewrap:  {}",
-        if sandbox::bwrap_available() {
-            "available"
-        } else {
-            "not found"
-        }
-    );
+
+    // Sandbox capabilities probe
+    let sandbox_check = sandbox::check_sandbox_capabilities();
+    for msg in &sandbox_check.messages {
+        println!("Sandbox:     {msg}");
+    }
     println!();
 
     // Check wasm target
@@ -642,6 +793,22 @@ fn cmd_info() -> anyhow::Result<()> {
     );
 
     println!();
+    println!("Isolation tiers:");
+    println!("  Tier 1 -- WASM sandbox (codejail run <module.wasm>)");
+    println!("    Enforcement: instruction-set isolation via WebAssembly");
+    println!("    Properties:  deny-by-default, no escape possible within WASM spec");
+    println!();
+    println!("  Tier 2 -- OS containment (codejail run --native-exec <binary>)");
+    println!("    Enforcement: Linux namespaces (bwrap) + seccomp-BPF syscall filter");
+    println!("    Properties:  permission-based isolation, syscall allowlist, defense in depth");
+    println!("    Requires:    bubblewrap, user namespaces");
+    println!("    Seccomp:     capability-driven allowlist (EPERM on denied syscalls)");
+    if sandbox_check.can_sandbox() {
+        println!("    Status:      AVAILABLE");
+    } else {
+        println!("    Status:      NOT AVAILABLE (see sandbox messages above)");
+    }
+    println!();
     println!("Capability model: deny-by-default");
     println!("  --cap fs:read:/path    Grant read access to directory");
     println!("  --cap fs:write:/path   Grant write access to directory");
@@ -653,6 +820,7 @@ fn cmd_info() -> anyhow::Result<()> {
     println!("  -e KEY=VALUE           Set environment variable");
     println!("  --net                  Allow all network access");
     println!("  --bwrap                Enable bubblewrap outer sandbox");
+    println!("  --no-sandbox           Disable OS containment (native-exec only)");
     Ok(())
 }
 
