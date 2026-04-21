@@ -1,3 +1,8 @@
+# Introduction
+I generated this repository using Claude Code after running into issues with the agent loop applifying hallucinated responses which led towards concerning outcomes.
+
+I didn't write it myself. It seems useful and worth sharing. Take it as you will. The rest of the text in this repo is AI-generated.
+
 # codejail
 
 A WASM sandbox for AI agent tool execution. Run tool implementations as WebAssembly modules with deny-by-default capabilities, policy-controlled authorization, intent-drift detection, and full audit trails. Every capability grant is evaluated against policy before the sandbox starts.
